@@ -1,0 +1,152 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #fdfcf9;
+  --ink: #1a1c1a;
+  --accent: #006b54;
+  --ink-faint: rgba(26, 28, 26, 0.08);
+  --ink-muted: rgba(26, 28, 26, 0.65);
+}
+
+@layer base {
+  body {
+    background-color: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: #ffffff;
+  }
+}
+
+/* Custom typography classes */
+.font-syne {
+  font-family: 'Syne', sans-serif;
+}
+
+.font-mono-custom {
+  font-family: 'Space Mono', monospace;
+}
+
+/* Neo-brutalist custom styling from Variation 2 */
+.neo-border {
+  border: 1.5px solid var(--ink);
+}
+
+.neo-border-2 {
+  border: 2px solid var(--ink);
+}
+
+.neo-shadow {
+  box-shadow: 3.5px 3.5px 0 var(--ink);
+}
+
+.neo-shadow-sm {
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.neo-shadow-md {
+  box-shadow: 6px 6px 0 var(--ink);
+}
+
+.neo-shadow-lg {
+  box-shadow: 12px 12px 0 var(--ink);
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  border: 1px solid var(--ink);
+  background: var(--bg);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.status-badge.accent {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+.status-badge.danger {
+  color: #d00;
+  border-color: #d00;
+  background: #fff5f5;
+}
+
+.status-badge.warning {
+  color: #92400e;
+  border-color: #b45309;
+  background: #fef3c7;
+}
+
+button.neo-btn-primary {
+  background: var(--ink);
+  color: var(--bg);
+  border: 1.5px solid var(--ink);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.75rem;
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+button.neo-btn-primary:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+button.neo-btn-outline {
+  background: transparent;
+  color: var(--ink);
+  border: 1.5px solid var(--ink);
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+button.neo-btn-outline:hover {
+  background: var(--ink-faint);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(26, 28, 26, 0.2);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(26, 28, 26, 0.4);
+}
+
+/* Print styles for Laporan Rapor Asrama */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}

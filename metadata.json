@@ -1,0 +1,6 @@
+{
+  "name": "SIPASRA - Sistem Pengasuhan Sekolah Rakyat Terintegrasi 1 Jepara",
+  "description": "Aplikasi pengasuhan asrama terintegrasi bagi wali asuh untuk mencatat dan memantau perkembangan siswa SD di Sekolah Rakyat 1 Jepara.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
