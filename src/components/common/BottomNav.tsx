@@ -69,7 +69,7 @@ export const BottomNav: React.FC = () => {
         >
           <Grid className="w-4 h-4 text-[#1a1c1a]" />
           <span className="text-[9px] font-mono-custom font-bold tracking-wider mt-0.5">
-            MENU (12)
+            MENU (13)
           </span>
         </button>
       </div>

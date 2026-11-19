@@ -14,6 +14,8 @@ import {
   FileSpreadsheet,
   X,
   RotateCcw,
+  LogOut,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MenuItemId } from '../../types';
@@ -39,6 +41,7 @@ const MENU_GROUPS: { groupLabel: string; items: MenuItemConfig[] }[] = [
     groupLabel: 'Activities',
     items: [
       { id: 'kegiatan-harian', label: 'Kegiatan Harian', icon: CalendarClock },
+      { id: 'pergantian-shift', label: 'Catatan Pergantian Shift', icon: ArrowLeftRight },
       { id: 'kebersihan', label: 'Kebersihan & Kerapian', icon: Sparkles },
       { id: 'ibadah', label: 'Ibadah', icon: BookOpen },
       {
@@ -80,6 +83,7 @@ export const Sidebar: React.FC = () => {
     konselingList,
     pelanggaranList,
     resetToDefaultData,
+    logout,
   } = useApp();
 
   const sakitCount = kesehatanList.filter(
@@ -201,18 +205,28 @@ export const Sidebar: React.FC = () => {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm('Reset data contoh ke bawaan awal?')) {
-                resetToDefaultData();
-              }
-            }}
-            className="p-1.5 text-[#1a1c1a]/60 hover:text-[#1a1c1a] hover:bg-[#1a1c1a]/10 rounded border border-[#1a1c1a]/30 transition-colors"
-            title="Reset data awal"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm('Reset data contoh ke bawaan awal?')) {
+                  resetToDefaultData();
+                }
+              }}
+              className="p-1.5 text-[#1a1c1a]/60 hover:text-[#1a1c1a] hover:bg-[#1a1c1a]/10 rounded border border-[#1a1c1a]/30 transition-colors cursor-pointer"
+              title="Reset data awal"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={logout}
+              className="p-1.5 text-[#1a1c1a]/70 hover:text-rose-700 hover:bg-rose-50 rounded border border-[#1a1c1a]/30 hover:border-rose-600 transition-colors cursor-pointer"
+              title="Keluar dari akun"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </aside>
     </>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, Search, X } from 'lucide-react';
+import { LogOut, Menu, Search, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MenuItemId } from '../../types';
 
@@ -9,6 +9,7 @@ const MENU_LABELS: Record<MenuItemId, string> = {
   kamar: 'Data Kamar',
   'wali-asuh': 'Data Wali Asuh',
   'kegiatan-harian': 'Kegiatan Harian',
+  'pergantian-shift': 'Catatan Pergantian Shift',
   kebersihan: 'Kebersihan & Kerapian',
   ibadah: 'Ibadah',
   kesehatan: 'Kesehatan',
@@ -25,14 +26,16 @@ export const Header: React.FC = () => {
     setSearchQuery,
     mobileDrawerOpen,
     setMobileDrawerOpen,
-    waliAsuhList,
+    currentUser,
+    logout,
   } = useApp();
 
-  const currentWali = waliAsuhList[0] || {
-    nama: 'Ust. Jendral',
-    shiftPiket: 'Pagi (05:00 - 13:00)',
-  };
-  const currentInitials = currentWali.nama.replace('Ust. ', '').slice(0, 2).toUpperCase() || 'JN';
+  const displayName = currentUser?.displayName || 'Administrator';
+  const displayRole = currentUser?.role || 'Admin';
+  const currentInitials = displayName
+    .replace(/^(Ust\.|Pak|Bu)\s+/i, '')
+    .slice(0, 2)
+    .toUpperCase() || 'AD';
 
   return (
     <header className="sticky top-0 z-30 bg-[#fdfcf9] border-b-[1.5px] border-[#1a1c1a] no-print">
@@ -53,7 +56,7 @@ export const Header: React.FC = () => {
               SI-PASRA
             </span>
             <span className="text-xs text-[#1a1c1a]/40 font-mono-custom hidden md:inline">
-              //
+              /
             </span>
             <span className="text-xs sm:text-sm font-bold text-[#1a1c1a] tracking-tight uppercase font-mono-custom truncate">
               {MENU_LABELS[activeMenu]}
@@ -61,15 +64,15 @@ export const Header: React.FC = () => {
           </div>
         </div>
 
-        {/* Center/Right: Search & User Pill */}
-        <div className="flex items-center gap-3">
+        {/* Center/Right: Search & User Actions */}
+        <div className="flex items-center gap-2.5 sm:gap-3">
           {/* Minimal Editorial Search bar */}
           <div className="relative hidden sm:flex items-center">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search student or room..."
+              placeholder="Cari siswa atau kamar..."
               className="w-44 md:w-60 text-xs py-1.5 pl-7 pr-3 bg-transparent border-b-[1.5px] border-[#1a1c1a] text-[#1a1c1a] placeholder:text-[#1a1c1a]/40 focus:outline-none focus:border-[#006b54] font-mono-custom transition-all"
             />
             <Search className="w-3.5 h-3.5 text-[#1a1c1a]/60 absolute left-1 pointer-events-none" />
@@ -84,18 +87,29 @@ export const Header: React.FC = () => {
             )}
           </div>
 
-          {/* User Pill from Variation 2 */}
-          <div className="flex items-center gap-2.5 px-3 py-1 border-[1.5px] border-[#1a1c1a] rounded-full bg-[#fdfcf9] shrink-0">
+          {/* Active Account Info */}
+          <div className="flex items-center gap-2.5 px-2.5 py-1 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] shrink-0">
             <div className="text-right hidden sm:block">
-              <div className="font-bold text-xs text-[#1a1c1a] leading-tight">{currentWali.nama}</div>
-              <div className="text-[9px] text-[#006b54] font-mono-custom font-bold uppercase tracking-wider">
-                WALI ASUH PIKET
+              <div className="font-bold text-xs text-[#1a1c1a] leading-tight">{displayName}</div>
+              <div className="text-[10px] text-[#006b54] font-mono-custom font-bold uppercase tracking-wider">
+                {displayRole}
               </div>
             </div>
-            <div className="w-7 h-7 bg-[#1a1c1a] text-[#fdfcf9] rounded-full flex items-center justify-center text-[10px] font-bold font-mono-custom">
+            <div className="w-7 h-7 bg-[#1a1c1a] text-[#fdfcf9] flex items-center justify-center text-[10px] font-bold font-mono-custom">
               {currentInitials}
             </div>
           </div>
+
+          {/* Logout Button */}
+          <button
+            type="button"
+            onClick={logout}
+            title="Keluar dari akun"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] text-xs font-bold font-mono-custom border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-[#1a1c1a] hover:bg-rose-50 hover:text-rose-800 hover:border-rose-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Keluar</span>
+          </button>
         </div>
       </div>
     </header>

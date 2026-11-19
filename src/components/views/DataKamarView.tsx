@@ -1,19 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
-  Home,
   Plus,
   Users,
   Sparkles,
-  BedDouble,
-  UserCheck,
-  Building,
+  Trash2,
+  Pencil,
+  X,
   CheckCircle2,
-  ChevronRight,
-  Phone,
+  AlertCircle,
+  Home,
+  UserPlus,
+  UserMinus,
+  Crown,
+  ExternalLink,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Kamar } from '../../types';
-import { Modal } from '../common/Modal';
 
 export const DataKamarView: React.FC = () => {
   const {
@@ -21,14 +23,34 @@ export const DataKamarView: React.FC = () => {
     siswaList,
     waliAsuhList,
     addKamar,
+    updateKamar,
+    deleteKamar,
+    clearAllKamar,
+    updateSiswa,
     getWaliAsuh,
     getSiswa,
     setSelectedSiswaId,
+    setActiveMenu,
   } = useApp();
 
+  type ActiveKamarPanel = 'none' | 'add' | 'edit' | 'hapus' | 'penghuni';
+  const [activePanel, setActivePanel] = useState<ActiveKamarPanel>('none');
   const [selectedGedungFilter, setSelectedGedungFilter] = useState<string>('Semua');
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [selectedKamarDetail, setSelectedKamarDetail] = useState<Kamar | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Edit & Hapus state
+  const [editTargetId, setEditTargetId] = useState<string>('');
+  const [hapusMode, setHapusMode] = useState<'single' | 'all'>('single');
+  const [hapusSingleId, setHapusSingleId] = useState<string>('');
+  const [hapusAllConfirmed, setHapusAllConfirmed] = useState(false);
+
+  // Form Penghuni Kamar state
+  const [penghuniKamarId, setPenghuniKamarId] = useState<string>('');
+  const [penghuniSearchQuery, setPenghuniSearchQuery] = useState('');
+  const [assignSiswaId, setAssignSiswaId] = useState<string>('');
+
+  const formSectionRef = useRef<HTMLDivElement>(null);
 
   const initialFormState: Omit<Kamar, 'id'> = {
     nama: '',
@@ -43,6 +65,78 @@ export const DataKamarView: React.FC = () => {
 
   const [formData, setFormData] = useState<Omit<Kamar, 'id'>>(initialFormState);
 
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
+
+  const scrollToFormPanel = () => {
+    setTimeout(() => {
+      formSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
+
+  const populateEditForm = (kamar: Kamar) => {
+    setEditTargetId(kamar.id);
+    setFormError(null);
+    setFormData({
+      nama: kamar.nama,
+      gedung: kamar.gedung,
+      lantai: kamar.lantai,
+      kapasitas: kamar.kapasitas,
+      waliAsuhId: kamar.waliAsuhId,
+      ketuaKamarId: kamar.ketuaKamarId || '',
+      nilaiKebersihan: kamar.nilaiKebersihan,
+      kondisiFasilitas: kamar.kondisiFasilitas,
+    });
+  };
+
+  const handleOpenAdd = () => {
+    setFormData({
+      ...initialFormState,
+      waliAsuhId: waliAsuhList[0]?.id || '',
+    });
+    setFormError(null);
+    setActivePanel('add');
+    scrollToFormPanel();
+  };
+
+  const handleOpenEdit = (kamar?: Kamar) => {
+    const target = kamar || kamarList.find((k) => k.id === editTargetId) || kamarList[0];
+    if (target) {
+      populateEditForm(target);
+    } else {
+      setEditTargetId('');
+    }
+    setActivePanel('edit');
+    scrollToFormPanel();
+  };
+
+  const handleOpenHapus = (kamar?: Kamar, mode: 'single' | 'all' = 'single') => {
+    setHapusMode(mode);
+    setHapusAllConfirmed(false);
+    if (kamar) {
+      setHapusSingleId(kamar.id);
+    } else {
+      setHapusSingleId(kamarList[0]?.id || '');
+    }
+    setActivePanel('hapus');
+    scrollToFormPanel();
+  };
+
+  const handleOpenPenghuni = (kamar?: Kamar) => {
+    const targetId =
+      kamar?.id ||
+      (kamarList.some((k) => k.id === penghuniKamarId) ? penghuniKamarId : kamarList[0]?.id || '');
+    setPenghuniKamarId(targetId);
+    setPenghuniSearchQuery('');
+    setAssignSiswaId('');
+    setActivePanel('penghuni');
+    scrollToFormPanel();
+  };
+
   const filteredKamar = kamarList.filter((k) => {
     if (selectedGedungFilter === 'Semua') return true;
     return k.gedung.includes(selectedGedungFilter);
@@ -50,12 +144,112 @@ export const DataKamarView: React.FC = () => {
 
   const handleSaveAdd = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.nama) {
-      alert('Nama kamar wajib diisi');
+    const trimmedNama = formData.nama.trim();
+    if (!trimmedNama) {
+      setFormError('Nama kamar wajib diisi.');
       return;
     }
-    addKamar(formData);
-    setIsAddModalOpen(false);
+    setFormError(null);
+    addKamar({
+      ...formData,
+      nama: trimmedNama,
+      kapasitas: Math.max(1, Number(formData.kapasitas) || 1),
+    });
+    setSelectedGedungFilter('Semua');
+    setActivePanel('none');
+    setFormData(initialFormState);
+    showToast(`✓ Kamar "${trimmedNama}" berhasil ditambahkan.`);
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = kamarList.find((k) => k.id === editTargetId);
+    if (!target) {
+      setFormError('Pilih kamar yang akan diperbarui.');
+      return;
+    }
+    const trimmedNama = formData.nama.trim();
+    if (!trimmedNama) {
+      setFormError('Nama kamar wajib diisi.');
+      return;
+    }
+    setFormError(null);
+    updateKamar(target.id, {
+      ...formData,
+      nama: trimmedNama,
+      kapasitas: Math.max(1, Number(formData.kapasitas) || 1),
+    });
+    setActivePanel('none');
+    showToast(`✓ Data kamar "${trimmedNama}" berhasil diperbarui.`);
+  };
+
+  const handleConfirmDeleteSingle = (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = kamarList.find((k) => k.id === hapusSingleId);
+    if (!target) return;
+    deleteKamar(target.id);
+    const remaining = kamarList.filter((k) => k.id !== target.id);
+    setHapusSingleId(remaining[0]?.id || '');
+    if (penghuniKamarId === target.id) {
+      setPenghuniKamarId(remaining[0]?.id || '');
+    }
+    if (remaining.length === 0) {
+      setActivePanel('none');
+    }
+    showToast(`✓ Kamar "${target.nama}" berhasil dihapus.`);
+  };
+
+  const handleConfirmClearAll = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hapusAllConfirmed) return;
+    clearAllKamar();
+    setPenghuniKamarId('');
+    setHapusAllConfirmed(false);
+    setActivePanel('none');
+    showToast('✓ Seluruh data kamar berhasil dihapus. Siap diisi ulang melalui Form Tambah Kamar.');
+  };
+
+  const activePenghuniRoom =
+    kamarList.find((k) => k.id === penghuniKamarId) || kamarList[0] || null;
+  const activeRoomPenghuni = activePenghuniRoom
+    ? siswaList.filter((s) => s.kamarId === activePenghuniRoom.id)
+    : [];
+  const filteredRoomPenghuni = activeRoomPenghuni.filter(
+    (s) =>
+      !penghuniSearchQuery.trim() ||
+      s.nama.toLowerCase().includes(penghuniSearchQuery.toLowerCase()) ||
+      s.nisn.includes(penghuniSearchQuery)
+  );
+  const availableSiswaForRoom = activePenghuniRoom
+    ? siswaList.filter((s) => s.kamarId !== activePenghuniRoom.id)
+    : [];
+
+  const handleAssignSiswaToRoom = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activePenghuniRoom || !assignSiswaId) return;
+    const student = siswaList.find((s) => s.id === assignSiswaId);
+    if (!student) return;
+    updateSiswa(student.id, {
+      kamarId: activePenghuniRoom.id,
+      waliAsuhId: activePenghuniRoom.waliAsuhId || student.waliAsuhId,
+    });
+    setAssignSiswaId('');
+    showToast(`✓ Santri ${student.nama} berhasil dimasukkan ke ${activePenghuniRoom.nama}.`);
+  };
+
+  const handleRemoveSiswaFromRoom = (siswaId: string, namaSiswa: string) => {
+    if (!activePenghuniRoom) return;
+    updateSiswa(siswaId, { kamarId: '' });
+    if (activePenghuniRoom.ketuaKamarId === siswaId) {
+      updateKamar(activePenghuniRoom.id, { ketuaKamarId: '' });
+    }
+    showToast(`✓ Santri ${namaSiswa} dikeluarkan dari ${activePenghuniRoom.nama}.`);
+  };
+
+  const handleSetKetuaKamar = (siswaId: string, namaSiswa: string) => {
+    if (!activePenghuniRoom) return;
+    updateKamar(activePenghuniRoom.id, { ketuaKamarId: siswaId });
+    showToast(`✓ ${namaSiswa} ditetapkan sebagai Ketua ${activePenghuniRoom.nama}.`);
   };
 
   return (
@@ -66,317 +260,1055 @@ export const DataKamarView: React.FC = () => {
           <div className="flex items-center gap-2 text-xs font-mono-custom text-[#006b54] font-bold uppercase tracking-wider mb-1">
             <span>// ASRAMA SEKOLAH RAKYAT 1 JEPARA</span>
             <span>·</span>
-            <span>8 KAMAR RESMI</span>
+            <span>{kamarList.length} KAMAR TERDAFTAR</span>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold font-syne text-[#1a1c1a] tracking-tight">
             Data Kamar & Kapasitas Santri SD
           </h1>
           <p className="text-xs text-[#1a1c1a]/70 font-mono-custom mt-1">
-            Total 8 Kamar Planet · 75 Santri Asrama Terbina
+            Total {kamarList.length} Kamar Asrama · {siswaList.length} Santri Terdaftar
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => {
-            setFormData(initialFormState);
-            setIsAddModalOpen(true);
-          }}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#006b54] hover:bg-[#005240] text-white text-xs font-bold font-mono-custom border-[1.5px] border-[#1a1c1a] shadow-[2.5px_2.5px_0px_#1a1c1a] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all uppercase tracking-wider shrink-0"
+          onClick={() => (activePanel === 'add' ? setActivePanel('none') : handleOpenAdd())}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#006b54] hover:bg-[#005240] text-white text-xs font-bold font-mono-custom border-[1.5px] border-[#1a1c1a] shadow-[2.5px_2.5px_0px_#1a1c1a] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all uppercase tracking-wider shrink-0 cursor-pointer whitespace-nowrap"
         >
-          <Plus className="w-4 h-4" />
-          Tambah Kamar
+          {activePanel === 'add' ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+          <span>{activePanel === 'add' ? 'Tutup Form' : 'Tambah Kamar'}</span>
         </button>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex gap-2 overflow-x-auto pb-1 font-mono-custom text-xs">
-        {[
-          { key: 'Semua', label: `SEMUA KAMAR (${kamarList.length})` },
-          { key: 'Putra', label: 'ASRAMA PUTRA (SULTAN HADLIRIN)' },
-          { key: 'Putri', label: 'ASRAMA PUTRI (RATU SHIMA)' },
-        ].map((tab) => (
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="p-3 bg-emerald-50 border-[1.5px] border-[#006b54] text-[#006b54] font-mono-custom text-xs font-bold flex items-center justify-between shadow-[2.5px_2.5px_0px_#1a1c1a]">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-[#006b54]" />
+            <span>{toastMessage}</span>
+          </div>
           <button
-            key={tab.key}
             type="button"
-            onClick={() => setSelectedGedungFilter(tab.key)}
-            className={`px-3.5 py-1.5 border-[1.5px] border-[#1a1c1a] font-bold text-xs uppercase transition-all whitespace-nowrap ${
-              selectedGedungFilter === tab.key
-                ? 'bg-[#1a1c1a] text-[#fdfcf9] shadow-[2.5px_2.5px_0px_#006b54]'
-                : 'bg-[#fdfcf9] text-[#1a1c1a] hover:bg-[#1a1c1a]/5'
-            }`}
+            onClick={() => setToastMessage(null)}
+            className="text-[10px] uppercase font-bold hover:underline ml-3 cursor-pointer"
           >
-            {tab.label}
+            TUTUP
           </button>
-        ))}
+        </div>
+      )}
+
+      {/* Menu Kelola Data Kamar */}
+      <div className="bg-white border-[1.5px] border-[#1a1c1a] p-3.5 neo-shadow font-mono-custom">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#006b54] block">
+              Menu Kelola Data Kamar
+            </span>
+            <p className="text-[11px] font-sans text-[#1a1c1a]/75">
+              Tambahkan kamar baru, lihat & atur penghuni kamar, ubah data kamar, atau hapus kamar asrama.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => (activePanel === 'add' ? setActivePanel('none') : handleOpenAdd())}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-[1.5px] border-[#1a1c1a] transition-all cursor-pointer whitespace-nowrap ${
+                activePanel === 'add'
+                  ? 'bg-[#006b54] text-white shadow-none translate-x-0.5 translate-y-0.5'
+                  : 'bg-[#fdfcf9] text-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] hover:bg-[#006b54] hover:text-white'
+              }`}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Form Tambah Kamar</span>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                activePanel === 'penghuni' ? setActivePanel('none') : handleOpenPenghuni()
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-[1.5px] border-[#1a1c1a] transition-all cursor-pointer whitespace-nowrap ${
+                activePanel === 'penghuni'
+                  ? 'bg-emerald-800 text-white shadow-none translate-x-0.5 translate-y-0.5'
+                  : 'bg-emerald-50 text-[#006b54] shadow-[2px_2px_0px_#1a1c1a] hover:bg-[#006b54] hover:text-white'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Form Penghuni Kamar</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => (activePanel === 'edit' ? setActivePanel('none') : handleOpenEdit())}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-[1.5px] border-[#1a1c1a] transition-all cursor-pointer whitespace-nowrap ${
+                activePanel === 'edit'
+                  ? 'bg-[#1a1c1a] text-white shadow-none translate-x-0.5 translate-y-0.5'
+                  : 'bg-[#fdfcf9] text-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] hover:bg-[#1a1c1a] hover:text-white'
+              }`}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>Form Edit</span>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                activePanel === 'hapus' ? setActivePanel('none') : handleOpenHapus(undefined, 'single')
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-[1.5px] border-rose-700 transition-all cursor-pointer whitespace-nowrap ${
+                activePanel === 'hapus'
+                  ? 'bg-rose-700 text-white shadow-none translate-x-0.5 translate-y-0.5'
+                  : 'bg-rose-50 text-rose-800 shadow-[2px_2px_0px_#9f1239] hover:bg-rose-700 hover:text-white'
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Form Hapus</span>
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Kamar Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {filteredKamar.map((kamar) => {
-          const penghuni = siswaList.filter((s) => s.kamarId === kamar.id);
-          const wali = getWaliAsuh(kamar.waliAsuhId);
-          const ketua = getSiswa(kamar.ketuaKamarId);
-
-          const isFull = penghuni.length >= kamar.kapasitas;
-
-          return (
-            <div
-              key={kamar.id}
-              className="bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] p-4 shadow-[3.5px_3.5px_0px_#1a1c1a] hover:shadow-[4.5px_4.5px_0px_#006b54] transition-all flex flex-col justify-between"
-            >
+      {/* INLINE FORM SECTION (TAMBAH / PENGHUNI / EDIT / HAPUS KAMAR) */}
+      <div ref={formSectionRef}>
+        {/* FORM TAMBAH KAMAR */}
+        {activePanel === 'add' && (
+          <div className="bg-white border-[1.5px] border-[#1a1c1a] shadow-[5px_5px_0px_#1a1c1a] p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b-[1.5px] border-[#1a1c1a]">
               <div>
-                {/* Header card */}
-                <div className="flex items-start justify-between gap-2 border-b-[1.5px] border-[#1a1c1a] pb-2.5 mb-3">
-                  <div>
-                    <span className="font-mono-custom text-[10px] text-[#006b54] font-bold uppercase tracking-wider block">
-                      {kamar.gedung.includes('Putra') ? 'Gedung Putra' : 'Gedung Putri'}
-                    </span>
-                    <h3 className="text-base font-bold font-syne text-[#1a1c1a] tracking-tight">
-                      {kamar.nama}
-                    </h3>
-                  </div>
+                <h2 className="font-syne text-xl font-extrabold text-[#1a1c1a] tracking-tight">
+                  Form Tambah Kamar Baru
+                </h2>
+                <p className="text-xs font-mono-custom text-[#1a1c1a]/65 mt-0.5">
+                  Lengkapi nama kamar, gedung asrama, lantai, kapasitas santri, dan wali asuh pembina.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePanel('none')}
+                className="p-1.5 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
+                aria-label="Tutup form tambah kamar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-                  <span
-                    className={`font-mono-custom text-[10px] font-bold px-2 py-0.5 border border-[#1a1c1a] uppercase ${
-                      isFull
-                        ? 'bg-[#1a1c1a] text-[#fdfcf9]'
-                        : 'bg-emerald-100 text-emerald-900'
-                    }`}
-                  >
-                    {penghuni.length} ANAK
-                  </span>
+            {formError && (
+              <div
+                role="alert"
+                className="mb-4 p-3 bg-rose-50 border border-rose-400 text-rose-900 text-xs font-medium flex items-center gap-2"
+              >
+                <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveAdd} className="space-y-4 font-mono-custom text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">NAMA KAMAR *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Kamar Neptunus / Kamar 01"
+                    value={formData.nama}
+                    onChange={(e) => {
+                      setFormData({ ...formData, nama: e.target.value });
+                      if (formError) setFormError(null);
+                    }}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] font-sans"
+                  />
                 </div>
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">GEDUNG ASRAMA *</label>
+                  <select
+                    value={formData.gedung}
+                    onChange={(e) =>
+                      setFormData({ ...formData, gedung: e.target.value as Kamar['gedung'] })
+                    }
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
+                  >
+                    <option value="Gedung Putra (Sultan Hadlirin)">Gedung Putra (Sultan Hadlirin)</option>
+                    <option value="Gedung Putri (Ratu Shima)">Gedung Putri (Ratu Shima)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">LANTAI</label>
+                  <select
+                    value={formData.lantai}
+                    onChange={(e) =>
+                      setFormData({ ...formData, lantai: e.target.value as Kamar['lantai'] })
+                    }
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
+                  >
+                    <option value="Lantai 1">Lantai 1</option>
+                    <option value="Lantai 2">Lantai 2</option>
+                  </select>
+                </div>
+              </div>
 
-                {/* Progress bar kapasitas */}
-                <div className="mb-3">
-                  <div className="flex justify-between text-[11px] font-mono-custom text-[#1a1c1a]/70 mb-1">
-                    <span>KAPASITAS:</span>
-                    <span className="font-bold text-[#1a1c1a]">
-                      {penghuni.length} / {kamar.kapasitas} Santri
-                    </span>
-                  </div>
-                  <div className="w-full bg-[#1a1c1a]/10 border border-[#1a1c1a] h-2">
-                    <div
-                      className="h-full bg-[#006b54]"
-                      style={{
-                        width: `${Math.min((penghuni.length / kamar.kapasitas) * 100, 100)}%`,
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">KAPASITAS (ANAK) *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="40"
+                    required
+                    value={formData.kapasitas}
+                    onChange={(e) => setFormData({ ...formData, kapasitas: Number(e.target.value) })}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">WALI ASUH PEMBINA *</label>
+                  <select
+                    value={formData.waliAsuhId}
+                    onChange={(e) => setFormData({ ...formData, waliAsuhId: e.target.value })}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
+                  >
+                    <option value="">-- Pilih Wali Asuh --</option>
+                    {waliAsuhList.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.nama} ({w.shiftPiket})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">KONDISI FASILITAS</label>
+                  <select
+                    value={formData.kondisiFasilitas}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        kondisiFasilitas: e.target.value as Kamar['kondisiFasilitas'],
+                      })
+                    }
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
+                  >
+                    <option value="Sangat Baik">Sangat Baik</option>
+                    <option value="Baik">Baik</option>
+                    <option value="Perlu Perbaikan">Perlu Perbaikan</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-[#1a1c1a] flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActivePanel('none')}
+                  className="px-4 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-[#1a1c1a] font-bold uppercase cursor-pointer"
+                >
+                  BATAL
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 px-5 py-2 border-[1.5px] border-[#1a1c1a] bg-[#006b54] hover:bg-[#005240] text-white font-bold uppercase shadow-[2.5px_2.5px_0px_#1a1c1a] cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>SIMPAN KAMAR BARU</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* FORM PENGHUNI KAMAR */}
+        {activePanel === 'penghuni' && (
+          <div className="bg-white border-[1.5px] border-[#1a1c1a] shadow-[5px_5px_0px_#006b54] p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b-[1.5px] border-[#1a1c1a]">
+              <div>
+                <h2 className="font-syne text-xl font-extrabold text-[#1a1c1a] tracking-tight">
+                  Form Data Penghuni Kamar
+                </h2>
+                <p className="text-xs font-mono-custom text-[#1a1c1a]/65 mt-0.5">
+                  Pilih kamar untuk melihat daftar santri penghuni, menetapkan ketua kamar, atau menambah/mengeluarkan santri.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePanel('none')}
+                className="p-1.5 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
+                aria-label="Tutup form penghuni kamar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {kamarList.length === 0 ? (
+              <div className="p-5 bg-[#fdfcf9] border border-[#1a1c1a]/30 text-center space-y-3">
+                <p className="font-sans text-xs text-[#1a1c1a]/80">
+                  Belum ada kamar asrama terdaftar. Silakan tambahkan kamar terlebih dahulu untuk melihat dan mengisi penghuni kamar.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenAdd}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#006b54] text-white text-xs font-bold font-mono-custom border border-[#1a1c1a] cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Buka Form Tambah Kamar</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4 font-mono-custom text-xs">
+                {/* Selector Kamar + Pencarian */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 bg-emerald-50/60 border-[1.5px] border-[#006b54]">
+                  <div>
+                    <label className="block font-bold text-[#1a1c1a] mb-1">
+                      Pilih Kamar Asrama ({kamarList.length} kamar)
+                    </label>
+                    <select
+                      value={activePenghuniRoom?.id || ''}
+                      onChange={(e) => {
+                        setPenghuniKamarId(e.target.value);
+                        setPenghuniSearchQuery('');
+                        setAssignSiswaId('');
                       }}
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-sans font-bold text-[#1a1c1a]"
+                    >
+                      {kamarList.map((k) => {
+                        const count = siswaList.filter((s) => s.kamarId === k.id).length;
+                        return (
+                          <option key={k.id} value={k.id}>
+                            {k.nama} — {k.gedung} ({count}/{k.kapasitas} santri)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-[#1a1c1a] mb-1">
+                      Cari Penghuni di Kamar Ini
+                    </label>
+                    <input
+                      type="text"
+                      value={penghuniSearchQuery}
+                      onChange={(e) => setPenghuniSearchQuery(e.target.value)}
+                      placeholder="Ketik nama atau NISN santri..."
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs"
                     />
                   </div>
                 </div>
 
-                {/* Metadata detail */}
-                <div className="space-y-1.5 text-xs font-mono-custom border border-[#1a1c1a]/20 bg-[#1a1c1a]/5 p-2.5 mb-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#1a1c1a]/60">WALI ASUH:</span>
-                    <span className="font-bold text-[#006b54] truncate max-w-[130px]">
-                      {wali?.nama || '-'}
+                {activePenghuniRoom && (
+                  <>
+                    {/* Info Ringkas Kamar */}
+                    <div className="p-3 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div>
+                        <span className="text-[10px] text-[#1a1c1a]/60 block">GEDUNG & LANTAI</span>
+                        <strong className="text-[#1a1c1a]">
+                          {activePenghuniRoom.gedung.includes('Putra') ? 'Putra' : 'Putri'} ·{' '}
+                          {activePenghuniRoom.lantai}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-[#1a1c1a]/60 block">WALI ASUH PEMBINA</span>
+                        <strong className="text-[#006b54]">
+                          {getWaliAsuh(activePenghuniRoom.waliAsuhId)?.nama || '-'}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-[#1a1c1a]/60 block">TERISI / KAPASITAS</span>
+                        <strong className="text-[#1a1c1a]">
+                          {activeRoomPenghuni.length} / {activePenghuniRoom.kapasitas} Santri
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-[#1a1c1a]/60 block">KONDISI FASILITAS</span>
+                        <strong className="text-[#1a1c1a]">
+                          {activePenghuniRoom.kondisiFasilitas}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {/* Tambah / Tempatkan Santri ke Kamar Ini */}
+                    <form
+                      onSubmit={handleAssignSiswaToRoom}
+                      className="p-3 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] flex flex-col sm:flex-row sm:items-end gap-2.5"
+                    >
+                      <div className="flex-1">
+                        <label className="block font-bold text-[#1a1c1a] mb-1">
+                          Masukkan Santri ke {activePenghuniRoom.nama}
+                        </label>
+                        <select
+                          value={assignSiswaId}
+                          onChange={(e) => setAssignSiswaId(e.target.value)}
+                          className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-sans"
+                        >
+                          <option value="">
+                            {availableSiswaForRoom.length === 0
+                              ? '-- Semua santri sudah berada di kamar ini / belum ada data santri --'
+                              : `-- Pilih santri (${availableSiswaForRoom.length} tersedia) --`}
+                          </option>
+                          {availableSiswaForRoom.map((s) => {
+                            const currentKamar = kamarList.find((k) => k.id === s.kamarId);
+                            return (
+                              <option key={s.id} value={s.id}>
+                                {s.nama} ({s.kelas}) —{' '}
+                                {currentKamar ? `Saat ini: ${currentKamar.nama}` : 'Belum Ada Kamar'}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={!assignSiswaId}
+                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#006b54] hover:bg-[#005240] disabled:opacity-40 text-white font-bold uppercase border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] cursor-pointer disabled:cursor-not-allowed whitespace-nowrap"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>Masukkan ke Kamar</span>
+                      </button>
+                    </form>
+
+                    {/* Daftar Penghuni Kamar */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold uppercase text-[#1a1c1a]">
+                          Daftar Penghuni {activePenghuniRoom.nama} ({filteredRoomPenghuni.length} Santri)
+                        </span>
+                      </div>
+
+                      {filteredRoomPenghuni.length === 0 ? (
+                        <div className="p-6 text-center bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a]/30 font-sans text-xs text-[#1a1c1a]/70">
+                          {activeRoomPenghuni.length === 0
+                            ? 'Belum ada santri yang menempati kamar ini. Gunakan pilihan di atas atau menu Data Siswa untuk menempatkan santri.'
+                            : 'Tidak ada penghuni kamar yang cocok dengan pencarian.'}
+                        </div>
+                      ) : (
+                        <div className="border-[1.5px] border-[#1a1c1a] divide-y divide-[#1a1c1a]/25">
+                          {filteredRoomPenghuni.map((siswa, idx) => {
+                            const isKetua = activePenghuniRoom.ketuaKamarId === siswa.id;
+                            return (
+                              <div
+                                key={siswa.id}
+                                className="p-3 bg-white hover:bg-[#fdfcf9] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <span className="w-7 h-7 bg-[#1a1c1a] text-[#fdfcf9] text-[11px] font-bold flex items-center justify-center shrink-0">
+                                    {idx + 1}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-syne font-bold text-sm text-[#1a1c1a] truncate">
+                                        {siswa.nama}
+                                      </span>
+                                      {isKetua && (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-500 uppercase">
+                                          <Crown className="w-2.5 h-2.5" />
+                                          Ketua Kamar
+                                        </span>
+                                      )}
+                                      <span
+                                        className={`text-[9px] font-bold px-1.5 py-0.5 border border-[#1a1c1a] uppercase ${
+                                          siswa.status === 'Aktif'
+                                            ? 'bg-[#006b54] text-white'
+                                            : siswa.status === 'Sakit' || siswa.status === 'Mutasi Keluar'
+                                            ? 'bg-rose-100 text-rose-900'
+                                            : 'bg-amber-200 text-[#1a1c1a]'
+                                        }`}
+                                      >
+                                        {siswa.status}
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] text-[#1a1c1a]/70 mt-0.5">
+                                      NISN: {siswa.nisn} · {siswa.kelas} ·{' '}
+                                      {siswa.jenisKelamin === 'L' ? 'Putra' : 'Putri'} · WA:{' '}
+                                      {siswa.orangTua.noHp || '-'}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                  {!isKetua && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetKetuaKamar(siswa.id, siswa.nama)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold border border-[#1a1c1a] bg-amber-50 hover:bg-amber-200 text-[#1a1c1a] uppercase cursor-pointer whitespace-nowrap"
+                                      title="Tetapkan sebagai Ketua Kamar"
+                                    >
+                                      <Crown className="w-3 h-3" />
+                                      <span>Ketua</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedSiswaId(siswa.id);
+                                      setActiveMenu('siswa');
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold border border-[#1a1c1a] bg-[#1a1c1a] hover:bg-[#006b54] text-white uppercase cursor-pointer whitespace-nowrap"
+                                  >
+                                    <ExternalLink className="w-3 h-3" />
+                                    <span>Profil</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveSiswaFromRoom(siswa.id, siswa.nama)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold border border-rose-700 bg-rose-50 hover:bg-rose-700 hover:text-white text-rose-800 uppercase cursor-pointer whitespace-nowrap"
+                                    title="Keluarkan santri dari kamar ini"
+                                  >
+                                    <UserMinus className="w-3 h-3" />
+                                    <span>Keluarkan</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                <div className="pt-2 border-t border-[#1a1c1a]/20 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setActivePanel('none')}
+                    className="px-4 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] hover:bg-[#1a1c1a] hover:text-white text-[#1a1c1a] font-bold uppercase cursor-pointer"
+                  >
+                    TUTUP FORM
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* FORM EDIT KAMAR */}
+        {activePanel === 'edit' && (
+          <div className="bg-white border-[1.5px] border-[#1a1c1a] shadow-[5px_5px_0px_#1a1c1a] p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b-[1.5px] border-[#1a1c1a]">
+              <div>
+                <h2 className="font-syne text-xl font-extrabold text-[#1a1c1a] tracking-tight">
+                  Form Edit Data Kamar
+                </h2>
+                <p className="text-xs font-mono-custom text-[#1a1c1a]/65 mt-0.5">
+                  Pilih kamar yang ingin diperbarui lalu simpan perubahan data kamar.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePanel('none')}
+                className="p-1.5 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
+                aria-label="Tutup form edit kamar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {kamarList.length === 0 ? (
+              <div className="p-5 bg-[#fdfcf9] border border-[#1a1c1a]/30 text-center space-y-3">
+                <p className="font-sans text-xs text-[#1a1c1a]/80">
+                  Belum ada data kamar untuk diedit. Silakan tambahkan kamar terlebih dahulu.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenAdd}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#006b54] text-white text-xs font-bold font-mono-custom border border-[#1a1c1a] cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Buka Form Tambah Kamar</span>
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleSaveEdit} className="space-y-4 font-mono-custom text-xs">
+                <div className="p-3.5 bg-emerald-50/60 border-[1.5px] border-[#006b54] space-y-1.5">
+                  <label className="block font-bold text-[#1a1c1a]">
+                    Pilih Kamar yang Akan Diedit ({kamarList.length} kamar) *
+                  </label>
+                  <select
+                    value={editTargetId}
+                    onChange={(e) => {
+                      const next = kamarList.find((k) => k.id === e.target.value);
+                      if (next) populateEditForm(next);
+                    }}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-sans font-bold"
+                  >
+                    {kamarList.map((k) => (
+                      <option key={k.id} value={k.id}>
+                        {k.nama} — {k.gedung} ({k.lantai})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {formError && (
+                  <div
+                    role="alert"
+                    className="p-3 bg-rose-50 border border-rose-400 text-rose-900 text-xs font-medium flex items-center gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                    <span>{formError}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-bold text-[#1a1c1a] mb-1">NAMA KAMAR *</label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.nama}
+                      onChange={(e) => {
+                        setFormData({ ...formData, nama: e.target.value });
+                        if (formError) setFormError(null);
+                      }}
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] font-sans"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-[#1a1c1a] mb-1">GEDUNG ASRAMA *</label>
+                    <select
+                      value={formData.gedung}
+                      onChange={(e) =>
+                        setFormData({ ...formData, gedung: e.target.value as Kamar['gedung'] })
+                      }
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9]"
+                    >
+                      <option value="Gedung Putra (Sultan Hadlirin)">Gedung Putra (Sultan Hadlirin)</option>
+                      <option value="Gedung Putri (Ratu Shima)">Gedung Putri (Ratu Shima)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-[#1a1c1a] mb-1">LANTAI</label>
+                    <select
+                      value={formData.lantai}
+                      onChange={(e) =>
+                        setFormData({ ...formData, lantai: e.target.value as Kamar['lantai'] })
+                      }
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9]"
+                    >
+                      <option value="Lantai 1">Lantai 1</option>
+                      <option value="Lantai 2">Lantai 2</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-bold text-[#1a1c1a] mb-1">KAPASITAS (ANAK) *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="40"
+                      required
+                      value={formData.kapasitas}
+                      onChange={(e) =>
+                        setFormData({ ...formData, kapasitas: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-[#1a1c1a] mb-1">WALI ASUH PEMBINA</label>
+                    <select
+                      value={formData.waliAsuhId}
+                      onChange={(e) => setFormData({ ...formData, waliAsuhId: e.target.value })}
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9]"
+                    >
+                      <option value="">-- Pilih Wali Asuh --</option>
+                      {waliAsuhList.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.nama} ({w.shiftPiket})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-[#1a1c1a] mb-1">KONDISI FASILITAS</label>
+                    <select
+                      value={formData.kondisiFasilitas}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          kondisiFasilitas: e.target.value as Kamar['kondisiFasilitas'],
+                        })
+                      }
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9]"
+                    >
+                      <option value="Sangat Baik">Sangat Baik</option>
+                      <option value="Baik">Baik</option>
+                      <option value="Perlu Perbaikan">Perlu Perbaikan</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-[#1a1c1a] flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = kamarList.find((k) => k.id === editTargetId);
+                      if (target) handleOpenHapus(target, 'single');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-rose-700 border-[1.5px] border-rose-700 bg-rose-50 hover:bg-rose-700 hover:text-white font-bold uppercase cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Hapus Kamar Ini</span>
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActivePanel('none')}
+                      className="px-4 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-[#1a1c1a] font-bold uppercase cursor-pointer"
+                    >
+                      BATAL
+                    </button>
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-1.5 px-5 py-2 border-[1.5px] border-[#1a1c1a] bg-[#006b54] hover:bg-[#005240] text-white font-bold uppercase shadow-[2.5px_2.5px_0px_#1a1c1a] cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>SIMPAN PERUBAHAN</span>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+
+        {/* FORM HAPUS DATA KAMAR */}
+        {activePanel === 'hapus' && (
+          <div className="bg-white border-[1.5px] border-rose-700 shadow-[5px_5px_0px_#9f1239] p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b-[1.5px] border-rose-700">
+              <div>
+                <h2 className="font-syne text-xl font-extrabold text-rose-900 tracking-tight">
+                  Form Hapus Data Kamar
+                </h2>
+                <p className="text-xs font-mono-custom text-rose-900/75 mt-0.5">
+                  Hapus satu kamar yang salah input atau kosongkan seluruh data kamar asrama.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePanel('none')}
+                className="p-1.5 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
+                aria-label="Tutup form hapus kamar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {kamarList.length === 0 ? (
+              <div className="p-5 bg-[#fdfcf9] border border-[#1a1c1a]/30 text-center space-y-2">
+                <p className="font-sans text-xs text-[#1a1c1a]/80">
+                  Saat ini tidak ada data kamar tersimpan (0 kamar).
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4 font-mono-custom text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHapusMode('single');
+                      if (!hapusSingleId && kamarList[0]) setHapusSingleId(kamarList[0].id);
+                    }}
+                    className={`px-3 py-2 font-bold border-[1.5px] cursor-pointer transition-colors ${
+                      hapusMode === 'single'
+                        ? 'bg-rose-700 text-white border-[#1a1c1a]'
+                        : 'bg-[#fdfcf9] text-[#1a1c1a] border-[#1a1c1a]/40 hover:border-[#1a1c1a]'
+                    }`}
+                  >
+                    1. Hapus 1 Kamar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHapusMode('all')}
+                    className={`px-3 py-2 font-bold border-[1.5px] cursor-pointer transition-colors ${
+                      hapusMode === 'all'
+                        ? 'bg-rose-700 text-white border-[#1a1c1a]'
+                        : 'bg-[#fdfcf9] text-[#1a1c1a] border-[#1a1c1a]/40 hover:border-[#1a1c1a]'
+                    }`}
+                  >
+                    2. Hapus Semua Kamar ({kamarList.length})
+                  </button>
+                </div>
+
+                {hapusMode === 'single' && (
+                  <form onSubmit={handleConfirmDeleteSingle} className="space-y-3">
+                    <div>
+                      <label className="block font-bold text-[#1a1c1a] mb-1">
+                        Pilih Kamar yang Akan Dihapus *
+                      </label>
+                      <select
+                        value={hapusSingleId}
+                        onChange={(e) => setHapusSingleId(e.target.value)}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] font-sans font-bold"
+                      >
+                        {kamarList.map((k) => (
+                          <option key={k.id} value={k.id}>
+                            {k.nama} — {k.gedung} ({k.lantai})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {(() => {
+                      const target = kamarList.find((k) => k.id === hapusSingleId);
+                      if (!target) return null;
+                      const penghuniCount = siswaList.filter((s) => s.kamarId === target.id).length;
+                      return (
+                        <div className="p-3.5 bg-rose-50 border-[1.5px] border-rose-600 text-rose-950 space-y-1">
+                          <div className="font-bold text-sm font-sans">{target.nama}</div>
+                          <div>
+                            Gedung: <strong>{target.gedung}</strong> · {target.lantai}
+                          </div>
+                          <div>
+                            Kapasitas: <strong>{target.kapasitas} anak</strong> · Penghuni saat ini:{' '}
+                            <strong>{penghuniCount} santri</strong>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    <div className="flex justify-end gap-2 pt-2 border-t border-rose-200">
+                      <button
+                        type="button"
+                        onClick={() => setActivePanel('none')}
+                        className="px-4 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-[#1a1c1a] font-bold uppercase cursor-pointer"
+                      >
+                        BATAL
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={!hapusSingleId}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-700 hover:bg-rose-800 disabled:opacity-40 text-white font-bold uppercase border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>YA, HAPUS KAMAR INI</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {hapusMode === 'all' && (
+                  <form onSubmit={handleConfirmClearAll} className="space-y-3">
+                    <div className="p-3.5 bg-rose-50 border-[1.5px] border-rose-600 text-rose-950 space-y-1.5">
+                      <div className="font-bold">
+                        Peringatan: Anda akan menghapus seluruh {kamarList.length} data kamar!
+                      </div>
+                      <p className="font-sans text-xs">
+                        Catatan kebersihan kamar terkait juga akan dikosongkan. Data santri dan wali asuh tetap aman.
+                      </p>
+                    </div>
+
+                    <label className="flex items-center gap-2 p-2.5 bg-[#fdfcf9] border border-[#1a1c1a] cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={hapusAllConfirmed}
+                        onChange={(e) => setHapusAllConfirmed(e.target.checked)}
+                        className="w-4 h-4 accent-rose-700"
+                      />
+                      <span className="font-sans font-bold text-[#1a1c1a]">
+                        Saya yakin ingin menghapus seluruh data kamar asrama.
+                      </span>
+                    </label>
+
+                    <div className="flex justify-end gap-2 pt-2 border-t border-rose-200">
+                      <button
+                        type="button"
+                        onClick={() => setActivePanel('none')}
+                        className="px-4 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-[#1a1c1a] font-bold uppercase cursor-pointer"
+                      >
+                        BATAL
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={!hapusAllConfirmed}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-700 hover:bg-rose-800 disabled:opacity-40 text-white font-bold uppercase border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>YA, HAPUS SEMUA KAMAR</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Filter Tabs + Quick Hapus Semua */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-1 font-mono-custom text-xs">
+        <div className="flex gap-2 overflow-x-auto">
+          {[
+            { key: 'Semua', label: `SEMUA KAMAR (${kamarList.length})` },
+            { key: 'Putra', label: 'ASRAMA PUTRA (SULTAN HADLIRIN)' },
+            { key: 'Putri', label: 'ASRAMA PUTRI (RATU SHIMA)' },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setSelectedGedungFilter(tab.key)}
+              className={`px-3.5 py-1.5 border-[1.5px] border-[#1a1c1a] font-bold text-xs uppercase transition-all whitespace-nowrap cursor-pointer ${
+                selectedGedungFilter === tab.key
+                  ? 'bg-[#1a1c1a] text-[#fdfcf9] shadow-[2.5px_2.5px_0px_#006b54]'
+                  : 'bg-[#fdfcf9] text-[#1a1c1a] hover:bg-[#1a1c1a]/5'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {kamarList.length > 0 && (
+          <button
+            type="button"
+            onClick={() => handleOpenHapus(undefined, 'all')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border-[1.5px] border-rose-700 bg-rose-50 text-rose-800 hover:bg-rose-700 hover:text-white transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Hapus Semua Kamar</span>
+          </button>
+        )}
+      </div>
+
+      {/* Empty State when 0 Kamar */}
+      {filteredKamar.length === 0 ? (
+        <div className="p-8 text-center bg-white border-[1.5px] border-[#1a1c1a] neo-shadow space-y-4">
+          <div className="w-12 h-12 mx-auto bg-emerald-50 border-[1.5px] border-[#1a1c1a] flex items-center justify-center">
+            <Home className="w-6 h-6 text-[#006b54]" />
+          </div>
+          {kamarList.length === 0 ? (
+            <>
+              <div className="space-y-1">
+                <h3 className="font-syne text-lg font-bold text-[#1a1c1a]">
+                  Belum Ada Data Kamar Asrama
+                </h3>
+                <p className="font-sans text-xs text-[#1a1c1a]/70 max-w-md mx-auto">
+                  Seluruh data kamar telah dikosongkan. Silakan tambahkan kamar asrama baru menggunakan Form Tambah Kamar di atas.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenAdd}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#006b54] hover:bg-[#005240] text-white text-xs font-bold font-mono-custom border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Kamar Baru</span>
+              </button>
+            </>
+          ) : (
+            <p className="font-mono-custom text-xs text-[#1a1c1a]/60 uppercase">
+              Tidak ada kamar di gedung yang dipilih.
+            </p>
+          )}
+        </div>
+      ) : (
+        /* Kamar Cards Grid */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {filteredKamar.map((kamar) => {
+            const penghuni = siswaList.filter((s) => s.kamarId === kamar.id);
+            const wali = getWaliAsuh(kamar.waliAsuhId);
+            const ketua = getSiswa(kamar.ketuaKamarId);
+
+            const isFull = penghuni.length >= kamar.kapasitas;
+
+            return (
+              <div
+                key={kamar.id}
+                className="bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] p-4 shadow-[3.5px_3.5px_0px_#1a1c1a] hover:shadow-[4.5px_4.5px_0px_#006b54] transition-all flex flex-col justify-between"
+              >
+                <div>
+                  {/* Header card */}
+                  <div className="flex items-start justify-between gap-2 border-b-[1.5px] border-[#1a1c1a] pb-2.5 mb-3">
+                    <div>
+                      <span className="font-mono-custom text-[10px] text-[#006b54] font-bold uppercase tracking-wider block">
+                        {kamar.gedung.includes('Putra') ? 'Gedung Putra' : 'Gedung Putri'} · {kamar.lantai}
+                      </span>
+                      <h3 className="text-base font-bold font-syne text-[#1a1c1a] tracking-tight">
+                        {kamar.nama}
+                      </h3>
+                    </div>
+
+                    <span
+                      className={`font-mono-custom text-[10px] font-bold px-2 py-0.5 border border-[#1a1c1a] uppercase shrink-0 ${
+                        isFull
+                          ? 'bg-[#1a1c1a] text-[#fdfcf9]'
+                          : 'bg-emerald-100 text-emerald-900'
+                      }`}
+                    >
+                      {penghuni.length} ANAK
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#1a1c1a]/60">KETUA:</span>
-                    <span className="font-bold text-[#1a1c1a] truncate max-w-[130px]">
-                      {ketua?.nama?.split(' ')[0] || (penghuni[0]?.nama?.split(' ')[0] ?? '-')}
-                    </span>
+
+                  {/* Progress bar kapasitas */}
+                  <div className="mb-3">
+                    <div className="flex justify-between text-[11px] font-mono-custom text-[#1a1c1a]/70 mb-1">
+                      <span>KAPASITAS:</span>
+                      <span className="font-bold text-[#1a1c1a]">
+                        {penghuni.length} / {kamar.kapasitas} Santri
+                      </span>
+                    </div>
+                    <div className="w-full bg-[#1a1c1a]/10 border border-[#1a1c1a] h-2">
+                      <div
+                        className="h-full bg-[#006b54]"
+                        style={{
+                          width: `${Math.min((penghuni.length / Math.max(kamar.kapasitas, 1)) * 100, 100)}%`,
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#1a1c1a]/60">KEBERSIHAN:</span>
-                    <span className="font-bold text-[#1a1c1a] flex items-center gap-1">
-                      <Sparkles className="w-3 h-3 text-amber-600 fill-amber-500" />
-                      {kamar.nilaiKebersihan.toFixed(1)} / 5.0
-                    </span>
+
+                  {/* Metadata detail */}
+                  <div className="space-y-1.5 text-xs font-mono-custom border border-[#1a1c1a]/20 bg-[#1a1c1a]/5 p-2.5 mb-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#1a1c1a]/60">WALI ASUH:</span>
+                      <span className="font-bold text-[#006b54] truncate max-w-[130px]">
+                        {wali?.nama || '-'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#1a1c1a]/60">KETUA:</span>
+                      <span className="font-bold text-[#1a1c1a] truncate max-w-[130px]">
+                        {ketua?.nama?.split(' ')[0] || (penghuni[0]?.nama?.split(' ')[0] ?? '-')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#1a1c1a]/60">KEBERSIHAN:</span>
+                      <span className="font-bold text-[#1a1c1a] flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-600 fill-amber-500" />
+                        {kamar.nilaiKebersihan.toFixed(1)} / 5.0
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="pt-2 border-t-[1.5px] border-[#1a1c1a] space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPenghuni(kamar)}
+                    className="w-full py-1.5 px-3 bg-[#1a1c1a] hover:bg-[#006b54] text-[#fdfcf9] text-xs font-bold font-mono-custom uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    LIHAT {penghuni.length} PENGHUNI
+                  </button>
+                  <div className="grid grid-cols-2 gap-1.5 font-mono-custom">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEdit(kamar)}
+                      className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-bold border border-[#1a1c1a] bg-white hover:bg-[#1a1c1a] hover:text-white text-[#1a1c1a] transition-colors cursor-pointer"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenHapus(kamar, 'single')}
+                      className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-bold border border-rose-700 bg-rose-50 hover:bg-rose-700 hover:text-white text-rose-800 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Hapus</span>
+                    </button>
                   </div>
                 </div>
               </div>
-
-              {/* Action buttons */}
-              <div className="pt-2 border-t-[1.5px] border-[#1a1c1a]">
-                <button
-                  type="button"
-                  onClick={() => setSelectedKamarDetail(kamar)}
-                  className="w-full py-1.5 px-3 bg-[#1a1c1a] hover:bg-[#006b54] text-[#fdfcf9] text-xs font-bold font-mono-custom uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  LIHAT {penghuni.length} PENGHUNI
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Modal Detail Penghuni Kamar */}
-      <Modal
-        isOpen={!!selectedKamarDetail}
-        onClose={() => setSelectedKamarDetail(null)}
-        title={selectedKamarDetail?.nama || 'Detail Kamar'}
-        subtitle={`${selectedKamarDetail?.gedung} · ${selectedKamarDetail?.lantai}`}
-        maxWidth="lg"
-      >
-        {selectedKamarDetail && (
-          <div className="space-y-4">
-            {/* Kamar Meta Bar */}
-            <div className="p-3 bg-[#1a1c1a]/5 border-[1.5px] border-[#1a1c1a] flex flex-wrap justify-between items-center gap-2 font-mono-custom text-xs">
-              <div>
-                <span className="text-[#1a1c1a]/60">WALI ASUH:</span>{' '}
-                <span className="font-bold text-[#006b54]">
-                  {getWaliAsuh(selectedKamarDetail.waliAsuhId)?.nama}
-                </span>
-              </div>
-              <div>
-                <span className="text-[#1a1c1a]/60">TOTAL ANAK:</span>{' '}
-                <span className="font-bold text-[#1a1c1a]">
-                  {siswaList.filter((s) => s.kamarId === selectedKamarDetail.id).length} Anak
-                </span>
-              </div>
-              <div>
-                <span className="text-[#1a1c1a]/60">KAPASITAS:</span>{' '}
-                <span className="font-bold text-[#1a1c1a]">
-                  {selectedKamarDetail.kapasitas} Ranjang
-                </span>
-              </div>
-            </div>
-
-            {/* List Santri Penghuni */}
-            <div>
-              <div className="font-mono-custom text-xs font-bold uppercase text-[#1a1c1a] mb-2 flex items-center gap-1">
-                <span>// DAFTAR SANTRI PENGHUNI KAMAR</span>
-              </div>
-
-              <div className="divide-y-[1.5px] divide-[#1a1c1a] border-[1.5px] border-[#1a1c1a]">
-                {siswaList
-                  .filter((s) => s.kamarId === selectedKamarDetail.id)
-                  .map((siswa, idx) => (
-                    <div
-                      key={siswa.id}
-                      className="p-3 flex items-center justify-between gap-3 bg-[#fdfcf9] hover:bg-[#1a1c1a]/5 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="w-6 h-6 bg-[#1a1c1a] text-[#fdfcf9] text-[10px] font-bold font-mono-custom flex items-center justify-center">
-                          {idx + 1}
-                        </span>
-                        <div>
-                          <div className="font-bold font-syne text-sm text-[#1a1c1a]">
-                            {siswa.nama}
-                          </div>
-                          <div className="text-[10px] font-mono-custom text-[#1a1c1a]/60">
-                            NISN: {siswa.nisn} · KELAS: {siswa.kelas}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`text-[9px] font-mono-custom font-bold px-2 py-0.5 border border-[#1a1c1a] uppercase ${
-                            siswa.status === 'Aktif'
-                              ? 'bg-[#006b54] text-white'
-                              : siswa.status === 'Sakit'
-                              ? 'bg-amber-400 text-[#1a1c1a]'
-                              : 'bg-blue-300 text-[#1a1c1a]'
-                          }`}
-                        >
-                          {siswa.status}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedKamarDetail(null);
-                            setSelectedSiswaId(siswa.id);
-                          }}
-                          className="px-2 py-1 bg-[#1a1c1a] hover:bg-[#006b54] text-[#fdfcf9] text-[10px] font-mono-custom font-bold uppercase transition-colors"
-                        >
-                          PROFIL
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Modal Tambah Kamar */}
-      <Modal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        title="TAMBAH KAMAR ASRAMA"
-        subtitle="Sekolah Rakyat 1 Jepara"
-        maxWidth="md"
-      >
-        <form onSubmit={handleSaveAdd} className="space-y-3 font-mono-custom text-xs">
-          <div>
-            <label className="block font-bold text-[#1a1c1a] mb-1">NAMA KAMAR *</label>
-            <input
-              type="text"
-              required
-              placeholder="Contoh: Kamar Pluto"
-              value={formData.nama}
-              onChange={(e) => setFormData({ ...formData, nama: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">GEDUNG *</label>
-              <select
-                value={formData.gedung}
-                onChange={(e) => setFormData({ ...formData, gedung: e.target.value as Kamar['gedung'] })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none"
-              >
-                <option value="Gedung Putra (Sultan Hadlirin)">Gedung Putra (Sultan Hadlirin)</option>
-                <option value="Gedung Putri (Ratu Shima)">Gedung Putri (Ratu Shima)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">KAPASITAS (ANAK) *</label>
-              <input
-                type="number"
-                min="1"
-                max="20"
-                required
-                value={formData.kapasitas}
-                onChange={(e) => setFormData({ ...formData, kapasitas: Number(e.target.value) })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none"
-              >
-              </input>
-            </div>
-          </div>
-
-          <div>
-            <label className="block font-bold text-[#1a1c1a] mb-1">WALI ASUH PEMBINA *</label>
-            <select
-              value={formData.waliAsuhId}
-              onChange={(e) => setFormData({ ...formData, waliAsuhId: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none"
-            >
-              {waliAsuhList.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.nama} ({w.shiftPiket})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="pt-3 border-t-[1.5px] border-[#1a1c1a] flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsAddModalOpen(false)}
-              className="px-4 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-[#1a1c1a] font-bold uppercase"
-            >
-              BATAL
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 border-[1.5px] border-[#1a1c1a] bg-[#006b54] text-white font-bold uppercase shadow-[2px_2px_0px_#1a1c1a]"
-            >
-              SIMPAN KAMAR
-            </button>
-          </div>
-        </form>
-      </Modal>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

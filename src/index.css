@@ -139,14 +139,40 @@ button.neo-btn-outline:hover {
 
 /* Print styles for Laporan Rapor Asrama */
 @media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   body {
     background: white !important;
     color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  main {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
   .no-print {
     display: none !important;
   }
   .print-only {
     display: block !important;
+  }
+  .neo-shadow,
+  .neo-shadow-sm,
+  .neo-shadow-md,
+  .neo-shadow-lg {
+    box-shadow: none !important;
+  }
+  .print-page-break {
+    page-break-after: always;
+    break-after: page;
+  }
+  .print-avoid-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Scale,
   Plus,
@@ -6,25 +6,22 @@ import {
   Clock,
   Sparkles,
   Calendar,
-  AlertTriangle,
   User,
   MapPin,
   Eye,
-  ArrowRight,
   RotateCcw,
   Search,
-  Filter,
   Trash2,
   Edit3,
   Users,
   ShieldCheck,
-  FileText,
   Tag,
   Check,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { PelanggaranPembinaan, StatusPelanggaran } from '../../types';
-import { Modal } from '../common/Modal';
 
 const PRESET_LOKASI = [
   'Musholla Asrama',
@@ -78,18 +75,25 @@ export const PelanggaranView: React.FC = () => {
   const [filterJenis, setFilterJenis] = useState<string>('Semua');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Modals
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  // Inline Form States (Tambah / Edit)
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<PelanggaranPembinaan | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const formSectionRef = useRef<HTMLDivElement>(null);
 
-  // Status Transition Modal
-  const [statusModalRecord, setStatusModalRecord] = useState<PelanggaranPembinaan | null>(null);
+  // Inline Status Transition per Card
+  const [statusEditingId, setStatusEditingId] = useState<string | null>(null);
   const [targetStatus, setTargetStatus] = useState<StatusPelanggaran>('Dipantau');
   const [catatanPerubahanInput, setCatatanPerubahanInput] = useState<string>('');
 
-  // Delete Confirmation Modal
-  const [deletingRecord, setDeletingRecord] = useState<PelanggaranPembinaan | null>(null);
+  // Inline Delete Confirmation per Card
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; nama: string } | null>(null);
+
+  const formatWaliName = (wali?: { nama: string; gelar?: string }) => {
+    if (!wali) return '';
+    return wali.gelar ? `${wali.nama}, ${wali.gelar}` : wali.nama;
+  };
 
   // Initial Form Data
   const getInitialForm = (): Omit<PelanggaranPembinaan, 'id'> => {
@@ -97,14 +101,15 @@ export const PelanggaranView: React.FC = () => {
     const currentTime = now.toTimeString().slice(0, 5); // "HH:MM"
     const today = now.toISOString().split('T')[0];
     const defaultSiswa = siswaList[0];
-    const defaultKamar = getKamar(defaultSiswa?.kamarId)?.nama || 'Kamar Al-Ghazali';
-    const defaultWali = getWaliAsuh(defaultSiswa?.waliAsuhId);
-    const defaultWaliName = defaultWali ? `${defaultWali.nama}, ${defaultWali.gelar}` : 'Ust. Farid, S.Pd';
+    const defaultKamar = getKamar(defaultSiswa?.kamarId)?.nama || kamarList[0]?.nama || '';
+    const defaultWali = getWaliAsuh(defaultSiswa?.waliAsuhId) || waliAsuhList[0];
+    const defaultWaliName = formatWaliName(defaultWali) || '';
 
     return {
       tanggal: today,
       jam: currentTime,
       siswaId: defaultSiswa?.id || '',
+      namaSiswa: defaultSiswa?.nama || '',
       kamar: defaultKamar,
       lokasi: 'Musholla Asrama',
       jenisPelanggaran: 'Kedisiplinan & Waktu',
@@ -120,19 +125,33 @@ export const PelanggaranView: React.FC = () => {
     };
   };
 
-  const [formData, setFormData] = useState<Omit<PelanggaranPembinaan, 'id'>>(getInitialForm());
+  const [formData, setFormData] = useState<Omit<PelanggaranPembinaan, 'id'>>(getInitialForm);
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
+
+  const scrollToForm = () => {
+    setTimeout(() => {
+      formSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
 
   // Handle student selection change in form -> auto populate kamar & petugas
   const handleSiswaChange = (siswaId: string) => {
     const s = getSiswa(siswaId);
     const k = getKamar(s?.kamarId);
     const w = getWaliAsuh(s?.waliAsuhId);
-    const waliName = w ? `${w.nama}, ${w.gelar}` : formData.petugas || formData.pembina || 'Wali Asuh';
+    const waliName = formatWaliName(w) || formData.petugas || formData.pembina || '';
 
     setFormData((prev) => ({
       ...prev,
       siswaId,
-      kamar: k ? k.nama : prev.kamar,
+      namaSiswa: s?.nama || (siswaId ? '' : prev.namaSiswa || ''),
+      kamar: k ? k.nama : siswaId ? prev.kamar : '',
       petugas: waliName,
       pembina: waliName,
     }));
@@ -140,16 +159,23 @@ export const PelanggaranView: React.FC = () => {
 
   const handleOpenAdd = () => {
     setFormData(getInitialForm());
-    setIsAddModalOpen(true);
+    setEditingRecord(null);
+    setFormError(null);
+    setIsFormOpen(true);
+    scrollToForm();
   };
 
   const handleOpenEdit = (item: PelanggaranPembinaan) => {
+    const s = getSiswa(item.siswaId);
+    const k = getKamar(s?.kamarId);
     setEditingRecord(item);
+    setFormError(null);
     setFormData({
       tanggal: item.tanggal,
       jam: item.jam || '14:00',
       siswaId: item.siswaId,
-      kamar: item.kamar || getKamar(getSiswa(item.siswaId)?.kamarId)?.nama || '',
+      namaSiswa: item.namaSiswa || s?.nama || '',
+      kamar: item.kamar || k?.nama || '',
       lokasi: item.lokasi || 'Musholla Asrama',
       jenisPelanggaran: item.jenisPelanggaran || 'Kedisiplinan & Waktu',
       tingkat: item.tingkat || 'Ringan',
@@ -162,61 +188,112 @@ export const PelanggaranView: React.FC = () => {
       status: item.status,
       catatanPerubahan: item.catatanPerubahan || '',
     });
-    setIsEditModalOpen(true);
+    setIsFormOpen(true);
+    scrollToForm();
   };
 
-  const handleSaveAdd = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.pelanggaran.trim() || !formData.bentukPembinaan.trim()) return;
-
-    addPelanggaran({
-      ...formData,
-      pembina: formData.petugas || formData.pembina,
-    });
-    setIsAddModalOpen(false);
+  const handleCloseForm = () => {
+    setIsFormOpen(false);
+    setEditingRecord(null);
+    setFormError(null);
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveForm = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingRecord) return;
-    if (!formData.pelanggaran.trim() || !formData.bentukPembinaan.trim()) return;
+    const resolvedSiswa = formData.siswaId ? getSiswa(formData.siswaId) : undefined;
+    const resolvedNama = resolvedSiswa?.nama || formData.namaSiswa?.trim() || '';
 
-    updatePelanggaran(editingRecord.id, {
+    if (!resolvedNama) {
+      setFormError('Pilih santri atau isi nama santri secara manual terlebih dahulu.');
+      return;
+    }
+    if (!formData.kamar?.trim()) {
+      setFormError('Kamar asrama wajib diisi.');
+      return;
+    }
+    if (!formData.lokasi?.trim()) {
+      setFormError('Lokasi kejadian wajib diisi.');
+      return;
+    }
+    if (!formData.pelanggaran.trim()) {
+      setFormError('Bentuk pelanggaran / deskripsi singkat wajib diisi.');
+      return;
+    }
+    if (!formData.kronologi.trim()) {
+      setFormError('Kronologi kejadian wajib diisi.');
+      return;
+    }
+    if (!formData.bentukPembinaan.trim()) {
+      setFormError('Bentuk pembinaan edukatif ramah anak wajib diisi.');
+      return;
+    }
+
+    const petugasValue = (formData.petugas || formData.pembina || '').trim() || 'Wali Asuh';
+    setFormError(null);
+
+    const payload: Omit<PelanggaranPembinaan, 'id'> = {
       ...formData,
-      pembina: formData.petugas || formData.pembina,
-    });
-    setIsEditModalOpen(false);
+      namaSiswa: resolvedNama,
+      kamar: formData.kamar.trim(),
+      lokasi: formData.lokasi.trim(),
+      pelanggaran: formData.pelanggaran.trim(),
+      kronologi: formData.kronologi.trim(),
+      bentukPembinaan: formData.bentukPembinaan.trim(),
+      saksi: formData.saksi?.trim() || '',
+      petugas: petugasValue,
+      pembina: petugasValue,
+      catatanPerubahan: formData.catatanPerubahan?.trim() || '',
+    };
+
+    if (editingRecord) {
+      updatePelanggaran(editingRecord.id, payload);
+      showToast(`✓ Catatan pembinaan ${resolvedNama} berhasil diperbarui.`);
+    } else {
+      addPelanggaran(payload);
+      showToast(`✓ Catatan pembinaan baru untuk ${resolvedNama} berhasil disimpan.`);
+    }
+
+    setIsFormOpen(false);
     setEditingRecord(null);
   };
 
-  const handleOpenStatusModal = (item: PelanggaranPembinaan, nextStatus: StatusPelanggaran) => {
-    setStatusModalRecord(item);
+  const handleOpenInlineStatus = (item: PelanggaranPembinaan, nextStatus: StatusPelanggaran) => {
+    setStatusEditingId(item.id);
     setTargetStatus(nextStatus);
     setCatatanPerubahanInput(item.catatanPerubahan || '');
+    setDeleteTarget(null);
   };
 
-  const handleConfirmStatusChange = (e: React.FormEvent) => {
+  const handleConfirmStatusChange = (e: React.FormEvent, itemId: string, siswaNama: string) => {
     e.preventDefault();
-    if (!statusModalRecord) return;
+    const defaultNote =
+      targetStatus === 'Selesai'
+        ? 'Santri telah menuntaskan tugas pembinaan edukatif dengan baik dan menunjukkan perubahan perilaku positif.'
+        : targetStatus === 'Dipantau'
+        ? 'Tugas pembinaan awal telah diselesaikan, kini memasuki masa pemantauan konsistensi sikap santri.'
+        : 'Santri sedang aktif menjalani bimbingan dan pembinaan edukatif.';
 
     updatePelanggaranStatus(
-      statusModalRecord.id,
+      itemId,
       targetStatus,
-      catatanPerubahanInput ||
-        (targetStatus === 'Selesai'
-          ? 'Santri telah menuntaskan tugas pembinaan edukatif dengan baik dan menunjukkan perubahan perilaku positif.'
-          : targetStatus === 'Dipantau'
-          ? 'Tugas pembinaan awal telah diselesaikan, kini memasuki masa pemantauan konsistensi sikap santri.'
-          : 'Santri sedang aktif menjalani bimbingan dan pembinaan edukatif.')
+      catatanPerubahanInput.trim() || defaultNote
     );
 
-    setStatusModalRecord(null);
+    setStatusEditingId(null);
+    showToast(`✓ Status pembinaan ${siswaNama} diperbarui menjadi "${targetStatus}".`);
   };
 
   const handleConfirmDelete = () => {
-    if (!deletingRecord) return;
-    deletePelanggaran(deletingRecord.id);
-    setDeletingRecord(null);
+    if (!deleteTarget) return;
+    deletePelanggaran(deleteTarget.id);
+    if (editingRecord?.id === deleteTarget.id) {
+      handleCloseForm();
+    }
+    if (statusEditingId === deleteTarget.id) {
+      setStatusEditingId(null);
+    }
+    showToast(`✓ Catatan pembinaan ${deleteTarget.nama} berhasil dihapus.`);
+    setDeleteTarget(null);
   };
 
   // Filtered List
@@ -251,7 +328,8 @@ export const PelanggaranView: React.FC = () => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const s = getSiswa(item.siswaId);
-        const matchNama = s?.nama.toLowerCase().includes(q);
+        const displayNama = (s?.nama || item.namaSiswa || '').toLowerCase();
+        const matchNama = displayNama.includes(q);
         const matchNisn = s?.nisn.includes(q);
         const matchPelanggaran = item.pelanggaran.toLowerCase().includes(q);
         const matchKronologi = item.kronologi.toLowerCase().includes(q);
@@ -300,6 +378,8 @@ export const PelanggaranView: React.FC = () => {
     };
   }, [pelanggaranList]);
 
+  const isAddingMode = isFormOpen && !editingRecord;
+
   return (
     <div className="space-y-5 pb-20 md:pb-8">
       {/* Neo-brutalist Header Banner */}
@@ -321,12 +401,410 @@ export const PelanggaranView: React.FC = () => {
 
         <button
           type="button"
-          onClick={handleOpenAdd}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#006b54] hover:bg-[#005240] text-white font-bold text-xs sm:text-sm border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all uppercase shrink-0"
+          onClick={() => (isAddingMode ? handleCloseForm() : handleOpenAdd())}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#006b54] hover:bg-[#005240] text-white font-bold text-xs sm:text-sm border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all uppercase shrink-0 cursor-pointer"
         >
-          <Plus className="w-4 h-4" />
-          <span>Catat Pembinaan Baru</span>
+          {isAddingMode ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+          <span>{isAddingMode ? 'Tutup Form' : 'Catat Pembinaan Baru'}</span>
         </button>
+      </div>
+
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="p-3 bg-emerald-50 border-[1.5px] border-[#006b54] text-[#006b54] font-mono-custom text-xs font-bold flex items-center justify-between shadow-[2.5px_2.5px_0px_#1a1c1a]">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-[#006b54]" />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="text-[10px] uppercase font-bold hover:underline ml-3 cursor-pointer"
+          >
+            TUTUP
+          </button>
+        </div>
+      )}
+
+      {/* INLINE FORM CATATAN PEMBINAAN BARU / EDIT */}
+      <div ref={formSectionRef}>
+        {isFormOpen && (
+          <div className="bg-white border-[1.5px] border-[#1a1c1a] shadow-[5px_5px_0px_#006b54] p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b-[1.5px] border-[#1a1c1a]">
+              <div>
+                <span className="text-[10px] font-mono-custom font-bold uppercase tracking-wider text-[#006b54] block">
+                  // FORMULIR DISIPLIN POSITIF & RESTITUSI SANTRI
+                </span>
+                <h2 className="font-syne text-xl font-extrabold text-[#1a1c1a] tracking-tight">
+                  {editingRecord ? 'Form Edit Catatan Pelanggaran & Pembinaan' : 'Form Catatan Pembinaan Baru'}
+                </h2>
+                <p className="text-xs font-mono-custom text-[#1a1c1a]/65 mt-0.5">
+                  Lengkapi waktu kejadian, identitas santri, kronologi, serta bentuk pembinaan edukatif ramah anak.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseForm}
+                className="p-1.5 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
+                aria-label="Tutup form catatan pembinaan"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {formError && (
+              <div
+                role="alert"
+                className="mb-4 p-3 bg-rose-50 border border-rose-400 text-rose-900 text-xs font-medium flex items-center gap-2"
+              >
+                <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveForm} className="space-y-4 text-xs font-mono-custom">
+              {/* Baris 1: Tanggal & Jam */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Tanggal Kejadian *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.tanggal}
+                    onChange={(e) => setFormData({ ...formData, tanggal: e.target.value })}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Jam Kejadian (WIB) *
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={formData.jam || ''}
+                    onChange={(e) => setFormData({ ...formData, jam: e.target.value })}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-mono-custom"
+                  />
+                </div>
+              </div>
+
+              {/* Baris 2: Nama Siswa & Kamar */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Nama Santri *
+                  </label>
+                  {siswaList.length > 0 ? (
+                    <select
+                      value={formData.siswaId}
+                      onChange={(e) => {
+                        handleSiswaChange(e.target.value);
+                        if (formError) setFormError(null);
+                      }}
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans font-semibold"
+                    >
+                      <option value="">-- Input Manual / Santri Belum Terdaftar --</option>
+                      {siswaList.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.nama} ({s.kelas} · {getKamar(s.kamarId)?.nama || '-'})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ketik nama santri..."
+                      value={formData.namaSiswa || ''}
+                      onChange={(e) => {
+                        setFormData({ ...formData, namaSiswa: e.target.value });
+                        if (formError) setFormError(null);
+                      }}
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans"
+                    />
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Kamar Asrama *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    list="kamar-pelanggaran-suggestions"
+                    placeholder="Contoh: Kamar Al-Ghazali"
+                    value={formData.kamar || ''}
+                    onChange={(e) => {
+                      setFormData({ ...formData, kamar: e.target.value });
+                      if (formError) setFormError(null);
+                    }}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans"
+                  />
+                  <datalist id="kamar-pelanggaran-suggestions">
+                    {kamarList.map((k) => (
+                      <option key={k.id} value={k.nama} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              {siswaList.length > 0 && !formData.siswaId && (
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Nama Santri (Input Manual) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ketik nama lengkap santri..."
+                    value={formData.namaSiswa || ''}
+                    onChange={(e) => {
+                      setFormData({ ...formData, namaSiswa: e.target.value });
+                      if (formError) setFormError(null);
+                    }}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans"
+                  />
+                </div>
+              )}
+
+              {/* Baris 3: Lokasi Kejadian */}
+              <div>
+                <label className="block font-bold text-[#1a1c1a] mb-1">
+                  Lokasi Kejadian *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Musholla Asrama, Ruang Makan, Koridor Lt 2..."
+                  value={formData.lokasi || ''}
+                  onChange={(e) => {
+                    setFormData({ ...formData, lokasi: e.target.value });
+                    if (formError) setFormError(null);
+                  }}
+                  className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans"
+                />
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <span className="text-[10px] text-[#1a1c1a]/55 self-center mr-1">Pilih cepat:</span>
+                  {PRESET_LOKASI.map((lok) => (
+                    <button
+                      key={lok}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, lokasi: lok })}
+                      className={`px-2 py-0.5 text-[10px] border rounded-sm cursor-pointer transition-colors ${
+                        formData.lokasi === lok
+                          ? 'bg-[#006b54] text-white border-[#1a1c1a]'
+                          : 'bg-[#1a1c1a]/5 hover:bg-[#1a1c1a]/10 border-[#1a1c1a]/20 text-[#1a1c1a]'
+                      }`}
+                    >
+                      {lok}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Baris 4: Jenis Pelanggaran & Tingkat */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Jenis Pelanggaran *
+                  </label>
+                  <select
+                    value={formData.jenisPelanggaran || 'Kedisiplinan & Waktu'}
+                    onChange={(e) => setFormData({ ...formData, jenisPelanggaran: e.target.value })}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs"
+                  >
+                    {PRESET_JENIS.map((j) => (
+                      <option key={j} value={j}>
+                        {j}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Tingkat Pelanggaran
+                  </label>
+                  <select
+                    value={formData.tingkat || 'Ringan'}
+                    onChange={(e) => setFormData({ ...formData, tingkat: e.target.value })}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-bold"
+                  >
+                    <option value="Ringan">Ringan (Lupa letak barang, terlambat antre, baju berantakan)</option>
+                    <option value="Sedang">Sedang (Bercanda berlebihan, berselisih sesama teman)</option>
+                    <option value="Perlu Pendampingan">Perlu Pendampingan Khusus (Berulang kali diingatkan)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Baris 5: Bentuk Pelanggaran */}
+              <div>
+                <label className="block font-bold text-[#1a1c1a] mb-1">
+                  Bentuk Pelanggaran / Deskripsi Singkat *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Meletakkan sepatu di luar rak musholla sehingga berserakan"
+                  value={formData.pelanggaran}
+                  onChange={(e) => {
+                    setFormData({ ...formData, pelanggaran: e.target.value });
+                    if (formError) setFormError(null);
+                  }}
+                  className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans"
+                />
+              </div>
+
+              {/* Baris 6: Kronologi Kejadian */}
+              <div>
+                <label className="block font-bold text-[#1a1c1a] mb-1">
+                  Kronologi Kejadian *
+                </label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="Ceritakan urutan kejadian secara jelas dan faktual..."
+                  value={formData.kronologi}
+                  onChange={(e) => {
+                    setFormData({ ...formData, kronologi: e.target.value });
+                    if (formError) setFormError(null);
+                  }}
+                  className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans"
+                />
+              </div>
+
+              {/* Baris 7: Bentuk Pembinaan Edukatif */}
+              <div>
+                <label className="block font-bold text-[#1a1c1a] mb-1">
+                  Bentuk Pembinaan Edukatif (Ramah Anak) *
+                </label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="Contoh: Merapikan rak sandal musholla selama 2 hari berturut-turut & membaca doa adab masjid..."
+                  value={formData.bentukPembinaan}
+                  onChange={(e) => {
+                    setFormData({ ...formData, bentukPembinaan: e.target.value });
+                    if (formError) setFormError(null);
+                  }}
+                  className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans"
+                />
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <span className="text-[10px] text-[#1a1c1a]/55 self-center mr-1">
+                    Rekomendasi Restitusi:
+                  </span>
+                  {PRESET_PEMBINAAN.map((pem, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, bentukPembinaan: pem })}
+                      className="px-2 py-0.5 text-[10px] bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 rounded-sm truncate max-w-[260px] cursor-pointer"
+                      title={pem}
+                    >
+                      {pem}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Baris 8: Saksi & Petugas / Wali Asuh */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Saksi Kejadian
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Teman sekamar, guru piket, pengurus musholla..."
+                    value={formData.saksi || ''}
+                    onChange={(e) => setFormData({ ...formData, saksi: e.target.value })}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Petugas / Wali Asuh Penanggung Jawab *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    list="petugas-pelanggaran-suggestions"
+                    placeholder="Nama petugas / wali asuh..."
+                    value={formData.petugas || formData.pembina || ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        petugas: e.target.value,
+                        pembina: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans font-semibold"
+                  />
+                  <datalist id="petugas-pelanggaran-suggestions">
+                    {waliAsuhList.map((w) => (
+                      <option key={w.id} value={formatWaliName(w)} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              {/* Baris 9: Status Awal & Catatan Evaluasi */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Status Alur Pembinaan
+                  </label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        status: e.target.value as StatusPelanggaran,
+                      })
+                    }
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-bold"
+                  >
+                    <option value="Dalam Pembinaan">1. Dalam Pembinaan (Aktif menjalankan tugas restitusi)</option>
+                    <option value="Dipantau">2. Dipantau (Observasi perubahan sikap pasca pembinaan)</option>
+                    <option value="Selesai">3. Selesai (Tuntas & santri menunjukkan komitmen tertib)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Catatan Evaluasi Perubahan Sikap (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Catatan perkembangan karakter & respon santri..."
+                    value={formData.catatanPerubahan || ''}
+                    onChange={(e) => setFormData({ ...formData, catatanPerubahan: e.target.value })}
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] text-xs font-sans"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-[#1a1c1a]">
+                <button
+                  type="button"
+                  onClick={handleCloseForm}
+                  className="px-4 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-[#1a1c1a] font-bold uppercase cursor-pointer"
+                >
+                  BATAL
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-[#006b54] hover:bg-[#005240] text-white font-bold border-[1.5px] border-[#1a1c1a] shadow-[2.5px_2.5px_0px_#1a1c1a] uppercase cursor-pointer"
+                >
+                  {editingRecord ? 'PERBARUI DATA' : 'SIMPAN PEMBINAAN'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
 
       {/* KPI Stats Strip */}
@@ -400,7 +878,6 @@ export const PelanggaranView: React.FC = () => {
 
       {/* Filter & Search Bar */}
       <div className="p-3 sm:p-4 bg-[#1a1c1a]/[0.04] border-[1.5px] border-[#1a1c1a] rounded flex flex-wrap gap-2.5 items-center">
-        {/* Status Filter */}
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
@@ -412,7 +889,6 @@ export const PelanggaranView: React.FC = () => {
           <option value="Selesai">Status: 3. Selesai</option>
         </select>
 
-        {/* Kamar Filter */}
         <select
           value={filterKamar}
           onChange={(e) => setFilterKamar(e.target.value)}
@@ -426,7 +902,6 @@ export const PelanggaranView: React.FC = () => {
           ))}
         </select>
 
-        {/* Jenis Filter */}
         <select
           value={filterJenis}
           onChange={(e) => setFilterJenis(e.target.value)}
@@ -440,7 +915,6 @@ export const PelanggaranView: React.FC = () => {
           ))}
         </select>
 
-        {/* Search Input */}
         <div className="relative flex-1 min-w-[220px]">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#1a1c1a]/40" />
           <input
@@ -461,7 +935,7 @@ export const PelanggaranView: React.FC = () => {
               setFilterJenis('Semua');
               setSearchQuery('');
             }}
-            className="text-[11px] font-mono-custom font-bold text-rose-700 hover:underline px-2"
+            className="text-[11px] font-mono-custom font-bold text-rose-700 hover:underline px-2 cursor-pointer"
           >
             Reset Filter
           </button>
@@ -473,6 +947,7 @@ export const PelanggaranView: React.FC = () => {
         {filteredList.map((item) => {
           const siswa = getSiswa(item.siswaId);
           const kamar = getKamar(siswa?.kamarId);
+          const displayNama = siswa?.nama || item.namaSiswa || 'Santri Asrama';
           const displayKamar = item.kamar || kamar?.nama || 'Kamar -';
           const displayPetugas = item.petugas || item.pembina || '-';
 
@@ -480,6 +955,9 @@ export const PelanggaranView: React.FC = () => {
           let currentStatus: StatusPelanggaran = item.status;
           if (currentStatus === 'Sedang Berjalan') currentStatus = 'Dalam Pembinaan';
           if (currentStatus === 'Tuntas') currentStatus = 'Selesai';
+
+          const isConfirmingDelete = deleteTarget?.id === item.id;
+          const isEditingStatus = statusEditingId === item.id;
 
           return (
             <div
@@ -495,7 +973,6 @@ export const PelanggaranView: React.FC = () => {
               {/* Header Bar: Tanggal, Jam, Status Badge, Tingkat */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-[#1a1c1a]/15">
                 <div className="flex items-center gap-2 flex-wrap">
-                  {/* Tanggal & Jam */}
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#1a1c1a]/[0.04] border border-[#1a1c1a]/30 text-xs font-mono-custom font-bold text-[#1a1c1a]">
                     <Calendar className="w-3.5 h-3.5 text-[#006b54]" />
                     <span>{item.tanggal}</span>
@@ -508,13 +985,11 @@ export const PelanggaranView: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Jenis Pelanggaran Tag */}
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-stone-100 border border-[#1a1c1a]/30 text-[11px] font-mono-custom font-semibold text-[#1a1c1a]">
                     <Tag className="w-3 h-3 text-[#1a1c1a]/60" />
                     <span>{item.jenisPelanggaran || 'Indisipliner'}</span>
                   </span>
 
-                  {/* Tingkat Pelanggaran */}
                   <span
                     className={`text-[10px] font-mono-custom font-bold px-2 py-0.5 border ${
                       item.tingkat === 'Ringan'
@@ -528,7 +1003,6 @@ export const PelanggaranView: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Status Badge */}
                 <div className="flex items-center gap-2">
                   <span
                     className={`text-xs font-mono-custom font-bold px-3 py-1 border-[1.5px] border-[#1a1c1a] shadow-[1.5px_1.5px_0px_#1a1c1a] uppercase ${
@@ -548,13 +1022,12 @@ export const PelanggaranView: React.FC = () => {
 
               {/* Student & Violation Meta Grid */}
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-                {/* Santri Info with Avatar (Columns 1-4) */}
                 <div className="md:col-span-4 flex items-start gap-3 bg-[#1a1c1a]/[0.02] p-3 border border-[#1a1c1a]/20">
                   <div className="w-12 h-14 bg-white border border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] flex items-center justify-center overflow-hidden shrink-0">
                     {siswa?.dokumen?.foto ? (
                       <img
                         src={siswa.dokumen.foto}
-                        alt={siswa.nama}
+                        alt={displayNama}
                         className="w-full h-full object-cover"
                       />
                     ) : (
@@ -564,10 +1037,10 @@ export const PelanggaranView: React.FC = () => {
 
                   <div className="min-w-0 flex-1">
                     <h3 className="font-syne font-bold text-sm text-[#1a1c1a] leading-tight truncate">
-                      {siswa?.nama || 'Nama Santri Tidak Ditemukan'}
+                      {displayNama}
                     </h3>
                     <p className="text-[11px] font-mono-custom text-[#1a1c1a]/70 mt-0.5">
-                      NISN: {siswa?.nisn || '-'} · {siswa?.kelas || '-'}
+                      NISN: {siswa?.nisn || '-'} · {siswa?.kelas || 'Santri Asrama'}
                     </p>
                     <p className="text-[11px] text-[#1a1c1a]/80 font-sans mt-0.5">
                       <strong>Kamar:</strong> {displayKamar}
@@ -579,9 +1052,7 @@ export const PelanggaranView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Pelanggaran, Kronologi, & Pembinaan (Columns 5-12) */}
                 <div className="md:col-span-8 space-y-2.5">
-                  {/* Pelanggaran & Kronologi */}
                   <div className="bg-white border border-[#1a1c1a] p-3">
                     <span className="font-mono-custom text-[10px] text-[#1a1c1a]/60 uppercase tracking-wider font-bold block mb-1">
                       // BENTUK PELANGGARAN & KRONOLOGI KEJADIAN
@@ -596,9 +1067,8 @@ export const PelanggaranView: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Bentuk Pembinaan Edukatif */}
                   <div className="bg-amber-50/70 border border-[#1a1c1a] p-3">
-                    <span className="font-mono-custom text-[10px] text-amber-900 uppercase tracking-wider font-bold block mb-1 flex items-center gap-1.5">
+                    <span className="font-mono-custom text-[10px] text-amber-900 uppercase tracking-wider font-bold mb-1 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-amber-700" />
                       // BENTUK PEMBINAAN EDUKATIF RAMAH ANAK
                     </span>
@@ -607,7 +1077,6 @@ export const PelanggaranView: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* Catatan Perubahan Perilaku (jika ada) */}
                   {item.catatanPerubahan && (
                     <div className="bg-emerald-50/80 border border-emerald-300 p-2.5 text-xs text-emerald-950 font-sans">
                       <strong className="font-mono-custom text-[10px] uppercase block text-emerald-800 mb-0.5">
@@ -633,7 +1102,7 @@ export const PelanggaranView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Lifecycle Progress Bar: Dalam Pembinaan → Dipantau → Selesai */}
+              {/* Lifecycle Progress Bar */}
               <div className="pt-2">
                 <div className="flex items-center justify-between text-[10px] font-mono-custom text-[#1a1c1a]/60 uppercase font-bold mb-1.5">
                   <span>Alur Status Pembinaan:</span>
@@ -643,7 +1112,6 @@ export const PelanggaranView: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-3 gap-1.5">
-                  {/* Step 1: Dalam Pembinaan */}
                   <div
                     className={`py-1.5 px-2 text-center text-[10px] font-mono-custom font-bold border ${
                       currentStatus === 'Dalam Pembinaan'
@@ -653,8 +1121,6 @@ export const PelanggaranView: React.FC = () => {
                   >
                     1. Dalam Pembinaan
                   </div>
-
-                  {/* Step 2: Dipantau */}
                   <div
                     className={`py-1.5 px-2 text-center text-[10px] font-mono-custom font-bold border ${
                       currentStatus === 'Dipantau'
@@ -666,8 +1132,6 @@ export const PelanggaranView: React.FC = () => {
                   >
                     2. Dipantau
                   </div>
-
-                  {/* Step 3: Selesai */}
                   <div
                     className={`py-1.5 px-2 text-center text-[10px] font-mono-custom font-bold border ${
                       currentStatus === 'Selesai'
@@ -680,24 +1144,120 @@ export const PelanggaranView: React.FC = () => {
                 </div>
               </div>
 
+              {/* Inline Status Update Form inside Card */}
+              {isEditingStatus && (
+                <form
+                  onSubmit={(e) => handleConfirmStatusChange(e, item.id, displayNama)}
+                  className="p-3.5 bg-sky-50/70 border-[1.5px] border-[#1a1c1a] space-y-3 text-xs font-mono-custom"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-[#1a1c1a] uppercase">
+                      // Perbarui Status Pembinaan: {displayNama}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setStatusEditingId(null)}
+                      className="text-[11px] font-bold text-[#1a1c1a]/70 hover:text-rose-700 cursor-pointer"
+                    >
+                      Tutup
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-[#1a1c1a] mb-1">
+                        Pilih Status Baru
+                      </label>
+                      <select
+                        value={targetStatus}
+                        onChange={(e) => setTargetStatus(e.target.value as StatusPelanggaran)}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-bold"
+                      >
+                        <option value="Dalam Pembinaan">1. Dalam Pembinaan (Aktif dibina)</option>
+                        <option value="Dipantau">2. Dipantau (Masa pemantauan)</option>
+                        <option value="Selesai">3. Selesai (Tuntas & perilaku membaik)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-[#1a1c1a] mb-1">
+                        Catatan Perubahan Perilaku Santri *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Tuliskan evaluasi sikap dan respon santri..."
+                        value={catatanPerubahanInput}
+                        onChange={(e) => setCatatanPerubahanInput(e.target.value)}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-sans"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStatusEditingId(null)}
+                      className="px-3 py-1.5 border border-[#1a1c1a] bg-white text-[#1a1c1a] font-bold uppercase cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-3 py-1.5 bg-[#006b54] hover:bg-[#005240] text-white font-bold border border-[#1a1c1a] shadow-[1.5px_1.5px_0px_#1a1c1a] uppercase cursor-pointer"
+                    >
+                      Simpan Status
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Inline Delete Confirmation Banner inside Card */}
+              {isConfirmingDelete && (
+                <div className="p-3 bg-rose-50 border-[1.5px] border-rose-600 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs font-mono-custom">
+                  <div>
+                    <p className="font-bold text-rose-900">
+                      Hapus catatan pembinaan untuk {displayNama}?
+                    </p>
+                    <p className="text-[11px] text-rose-800/80 font-sans">
+                      Tindakan ini tidak dapat dibatalkan.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(null)}
+                      className="px-3 py-1.5 border border-[#1a1c1a] bg-white text-[#1a1c1a] font-bold uppercase cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmDelete}
+                      className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white font-bold border border-[#1a1c1a] uppercase cursor-pointer"
+                    >
+                      Ya, Hapus
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Action Bar */}
               <div className="pt-2 border-t border-[#1a1c1a]/15 flex flex-wrap items-center justify-between gap-2">
-                {/* Quick Status Progression Buttons */}
                 <div className="flex flex-wrap items-center gap-1.5">
                   {currentStatus === 'Dalam Pembinaan' && (
                     <>
                       <button
                         type="button"
-                        onClick={() => handleOpenStatusModal(item, 'Dipantau')}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-950 font-bold text-xs border border-sky-400 shadow-xs transition-colors"
+                        onClick={() => handleOpenInlineStatus(item, 'Dipantau')}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-sky-100 hover:bg-sky-200 text-sky-950 font-bold text-xs border border-sky-400 shadow-xs transition-colors cursor-pointer"
                       >
                         <Eye className="w-3.5 h-3.5 text-sky-800" />
                         <span>Lanjut ke "Dipantau"</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleOpenStatusModal(item, 'Selesai')}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-950 font-bold text-xs border border-emerald-400 shadow-xs transition-colors"
+                        onClick={() => handleOpenInlineStatus(item, 'Selesai')}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-950 font-bold text-xs border border-emerald-400 shadow-xs transition-colors cursor-pointer"
                       >
                         <Check className="w-3.5 h-3.5 text-emerald-800" />
                         <span>Tandai "Selesai"</span>
@@ -709,16 +1269,16 @@ export const PelanggaranView: React.FC = () => {
                     <>
                       <button
                         type="button"
-                        onClick={() => handleOpenStatusModal(item, 'Selesai')}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-950 font-bold text-xs border border-emerald-400 shadow-xs transition-colors"
+                        onClick={() => handleOpenInlineStatus(item, 'Selesai')}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-950 font-bold text-xs border border-emerald-400 shadow-xs transition-colors cursor-pointer"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-800" />
                         <span>Selesaikan Pembinaan</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleOpenStatusModal(item, 'Dalam Pembinaan')}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs border border-stone-300 transition-colors"
+                        onClick={() => handleOpenInlineStatus(item, 'Dalam Pembinaan')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs border border-stone-300 transition-colors cursor-pointer"
                         title="Kembalikan ke status Dalam Pembinaan"
                       >
                         <RotateCcw className="w-3 h-3" />
@@ -730,8 +1290,8 @@ export const PelanggaranView: React.FC = () => {
                   {currentStatus === 'Selesai' && (
                     <button
                       type="button"
-                      onClick={() => handleOpenStatusModal(item, 'Dipantau')}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 font-medium text-xs border border-stone-300 transition-colors"
+                      onClick={() => handleOpenInlineStatus(item, 'Dipantau')}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 font-medium text-xs border border-stone-300 transition-colors cursor-pointer"
                     >
                       <RotateCcw className="w-3 h-3" />
                       <span>Buka Pemantauan Ulang</span>
@@ -739,12 +1299,11 @@ export const PelanggaranView: React.FC = () => {
                   )}
                 </div>
 
-                {/* Edit & Delete Buttons */}
                 <div className="flex items-center gap-1.5 ml-auto">
                   <button
                     type="button"
                     onClick={() => handleOpenEdit(item)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-stone-100 text-[#1a1c1a] font-bold text-xs border border-[#1a1c1a] shadow-[1.5px_1.5px_0px_#1a1c1a] transition-all"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-stone-100 text-[#1a1c1a] font-bold text-xs border border-[#1a1c1a] shadow-[1.5px_1.5px_0px_#1a1c1a] transition-all cursor-pointer"
                     title="Edit Data Lengkap"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
@@ -753,8 +1312,11 @@ export const PelanggaranView: React.FC = () => {
 
                   <button
                     type="button"
-                    onClick={() => setDeletingRecord(item)}
-                    className="p-1.5 bg-white hover:bg-rose-50 text-rose-700 border border-[#1a1c1a] shadow-[1.5px_1.5px_0px_#1a1c1a] transition-all"
+                    onClick={() => {
+                      setDeleteTarget({ id: item.id, nama: displayNama });
+                      setStatusEditingId(null);
+                    }}
+                    className="p-1.5 bg-white hover:bg-rose-50 text-rose-700 border border-[#1a1c1a] shadow-[1.5px_1.5px_0px_#1a1c1a] transition-all cursor-pointer"
                     title="Hapus Catatan"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -767,405 +1329,24 @@ export const PelanggaranView: React.FC = () => {
       </div>
 
       {filteredList.length === 0 && (
-        <div className="p-8 text-center bg-white border-[1.5px] border-[#1a1c1a] neo-shadow">
+        <div className="p-8 text-center bg-white border-[1.5px] border-[#1a1c1a] neo-shadow space-y-3">
           <p className="font-mono-custom text-xs text-[#1a1c1a]/60 uppercase">
-            Tidak ada catatan pelanggaran & pembinaan yang cocok dengan filter / pencarian.
+            {pelanggaranList.length === 0
+              ? 'Belum ada catatan pelanggaran & pembinaan yang tersimpan.'
+              : 'Tidak ada catatan pelanggaran & pembinaan yang cocok dengan filter / pencarian.'}
           </p>
+          {pelanggaranList.length === 0 && !isFormOpen && (
+            <button
+              type="button"
+              onClick={handleOpenAdd}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#006b54] hover:bg-[#005240] text-white font-bold text-xs border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] uppercase cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Catat Pembinaan Baru</span>
+            </button>
+          )}
         </div>
       )}
-
-      {/* MODAL TAMBAH & EDIT (LENGKAP 11 FIELD) */}
-      <Modal
-        isOpen={isAddModalOpen || isEditModalOpen}
-        onClose={() => {
-          setIsAddModalOpen(false);
-          setIsEditModalOpen(false);
-          setEditingRecord(null);
-        }}
-        title={isAddModalOpen ? 'Catat Pelanggaran & Pembinaan Baru' : 'Edit Catatan Pelanggaran & Pembinaan'}
-        subtitle="FORMULIR DISIPLIN POSITIF & RESTITUSI SANTRI"
-        maxWidth="2xl"
-      >
-        <form
-          onSubmit={isAddModalOpen ? handleSaveAdd : handleSaveEdit}
-          className="space-y-4 text-xs font-mono-custom"
-        >
-          {/* Baris 1: Tanggal & Jam */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Tanggal Kejadian *
-              </label>
-              <input
-                type="date"
-                required
-                value={formData.tanggal}
-                onChange={(e) => setFormData({ ...formData, tanggal: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs"
-              />
-            </div>
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Jam Kejadian (WIB) *
-              </label>
-              <input
-                type="time"
-                required
-                value={formData.jam || ''}
-                onChange={(e) => setFormData({ ...formData, jam: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-mono-custom"
-              />
-            </div>
-          </div>
-
-          {/* Baris 2: Nama Siswa & Kamar */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Nama Siswa *
-              </label>
-              <select
-                required
-                value={formData.siswaId}
-                onChange={(e) => handleSiswaChange(e.target.value)}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-sans font-semibold"
-              >
-                {siswaList.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nama} ({s.kelas} · {getKamar(s.kamarId)?.nama || '-'})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Kamar Asrama *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Contoh: Kamar Uranus (Gedung A)"
-                value={formData.kamar || ''}
-                onChange={(e) => setFormData({ ...formData, kamar: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs"
-              />
-            </div>
-          </div>
-
-          {/* Baris 3: Lokasi Kejadian */}
-          <div>
-            <label className="block font-bold text-[#1a1c1a] mb-1">
-              Lokasi Kejadian *
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Contoh: Musholla Asrama, Ruang Makan, Koridor Lt 2..."
-              value={formData.lokasi || ''}
-              onChange={(e) => setFormData({ ...formData, lokasi: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs"
-            />
-            {/* Quick preset locations */}
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              <span className="text-[10px] text-[#1a1c1a]/50 self-center mr-1">Pilih cepat:</span>
-              {PRESET_LOKASI.map((lok) => (
-                <button
-                  key={lok}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, lokasi: lok })}
-                  className="px-2 py-0.5 text-[9.5px] bg-[#1a1c1a]/5 hover:bg-[#1a1c1a]/10 border border-[#1a1c1a]/20 rounded-sm"
-                >
-                  {lok}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Baris 4: Jenis Pelanggaran & Tingkat */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Jenis Pelanggaran *
-              </label>
-              <select
-                value={formData.jenisPelanggaran || 'Kedisiplinan & Waktu'}
-                onChange={(e) => setFormData({ ...formData, jenisPelanggaran: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs"
-              >
-                {PRESET_JENIS.map((j) => (
-                  <option key={j} value={j}>
-                    {j}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Tingkat Pelanggaran
-              </label>
-              <select
-                value={formData.tingkat || 'Ringan'}
-                onChange={(e) => setFormData({ ...formData, tingkat: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-bold"
-              >
-                <option value="Ringan">Ringan (Lupa letak barang, terlambat antre, baju berantakan)</option>
-                <option value="Sedang">Sedang (Bercanda berlebihan, berselisih sesama teman)</option>
-                <option value="Perlu Pendampingan">Perlu Pendampingan Khusus (Berulang kali diingatkan)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Baris 5: Bentuk Pelanggaran */}
-          <div>
-            <label className="block font-bold text-[#1a1c1a] mb-1">
-              Bentuk Pelanggaran / Deskripsi Singkat *
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Contoh: Meletakkan sepatu di luar rak musholla sehingga berserakan"
-              value={formData.pelanggaran}
-              onChange={(e) => setFormData({ ...formData, pelanggaran: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs"
-            />
-          </div>
-
-          {/* Baris 6: Kronologi Kejadian */}
-          <div>
-            <label className="block font-bold text-[#1a1c1a] mb-1">
-              Kronologi Kejadian *
-            </label>
-            <textarea
-              rows={2}
-              required
-              placeholder="Ceritakan urutan kejadian secara jelas dan faktual..."
-              value={formData.kronologi}
-              onChange={(e) => setFormData({ ...formData, kronologi: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-sans"
-            />
-          </div>
-
-          {/* Baris 7: Bentuk Pembinaan Edukatif */}
-          <div>
-            <label className="block font-bold text-[#1a1c1a] mb-1">
-              Bentuk Pembinaan Edukatif (Ramah Anak) *
-            </label>
-            <textarea
-              rows={2}
-              required
-              placeholder="Contoh: Merapikan rak sandal musholla selama 2 hari berturut-turut & membaca doa adab masjid..."
-              value={formData.bentukPembinaan}
-              onChange={(e) => setFormData({ ...formData, bentukPembinaan: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-sans"
-            />
-            {/* Quick preset pembinaan */}
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              <span className="text-[10px] text-[#1a1c1a]/50 self-center mr-1">Rekomendasi Restitusi:</span>
-              {PRESET_PEMBINAAN.slice(0, 3).map((pem, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, bentukPembinaan: pem })}
-                  className="px-2 py-0.5 text-[9.5px] bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 rounded-sm truncate max-w-[260px]"
-                  title={pem}
-                >
-                  {pem}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Baris 8: Saksi & Petugas / Wali Asuh */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Saksi Kejadian
-              </label>
-              <input
-                type="text"
-                placeholder="Contoh: Teman sekamar, guru piket, pengurus musholla..."
-                value={formData.saksi || ''}
-                onChange={(e) => setFormData({ ...formData, saksi: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs"
-              />
-            </div>
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Petugas / Wali Asuh Penanggung Jawab *
-              </label>
-              <select
-                value={formData.petugas || formData.pembina}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    petugas: e.target.value,
-                    pembina: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-semibold"
-              >
-                {waliAsuhList.map((w) => (
-                  <option key={w.id} value={`${w.nama}, ${w.gelar}`}>
-                    {w.nama}, {w.gelar}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Baris 9: Status Awal */}
-          <div>
-            <label className="block font-bold text-[#1a1c1a] mb-1">
-              Status Alur Pembinaan
-            </label>
-            <select
-              value={formData.status}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  status: e.target.value as StatusPelanggaran,
-                })
-              }
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-bold"
-            >
-              <option value="Dalam Pembinaan">1. Dalam Pembinaan (Aktif menjalankan tugas restitusi)</option>
-              <option value="Dipantau">2. Dipantau (Observasi perubahan sikap pasca pembinaan)</option>
-              <option value="Selesai">3. Selesai (Tuntas & santri menunjukkan komitmen tertib)</option>
-            </select>
-          </div>
-
-          {/* Catatan Evaluasi Sikap (Opsional) */}
-          <div>
-            <label className="block font-bold text-[#1a1c1a] mb-1">
-              Catatan Evaluasi Perubahan Sikap (Opsional)
-            </label>
-            <textarea
-              rows={2}
-              placeholder="Catatan perkembangan karakter dan respon santri selama dibina..."
-              value={formData.catatanPerubahan || ''}
-              onChange={(e) => setFormData({ ...formData, catatanPerubahan: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-sans"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-[#1a1c1a]">
-            <button
-              type="button"
-              onClick={() => {
-                setIsAddModalOpen(false);
-                setIsEditModalOpen(false);
-                setEditingRecord(null);
-              }}
-              className="neo-btn-outline"
-            >
-              BATAL
-            </button>
-            <button type="submit" className="neo-btn-primary">
-              {isAddModalOpen ? 'SIMPAN PEMBINAAN' : 'PERBARUI DATA'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* MODAL TRANSISI STATUS & EVALUASI */}
-      <Modal
-        isOpen={!!statusModalRecord}
-        onClose={() => setStatusModalRecord(null)}
-        title={`Perbarui Status: ${targetStatus}`}
-        subtitle={getSiswa(statusModalRecord?.siswaId)?.nama || 'Santri Asrama'}
-        maxWidth="md"
-      >
-        {statusModalRecord && (
-          <form onSubmit={handleConfirmStatusChange} className="space-y-4 text-xs font-mono-custom">
-            <div className="bg-[#1a1c1a]/[0.03] p-3 border border-[#1a1c1a] space-y-1">
-              <span className="font-bold text-[#1a1c1a] block">
-                Pelanggaran: {statusModalRecord.pelanggaran}
-              </span>
-              <span className="text-[#1a1c1a]/70 block font-sans text-[11px]">
-                Pembinaan: {statusModalRecord.bentukPembinaan}
-              </span>
-            </div>
-
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Pilih Status Baru:
-              </label>
-              <select
-                value={targetStatus}
-                onChange={(e) => setTargetStatus(e.target.value as StatusPelanggaran)}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-bold"
-              >
-                <option value="Dalam Pembinaan">1. Dalam Pembinaan (Aktif dibina)</option>
-                <option value="Dipantau">2. Dipantau (Masa pemantauan)</option>
-                <option value="Selesai">3. Selesai (Tuntas & perilaku membaik)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-bold text-[#1a1c1a] mb-1">
-                Catatan Perubahan Perilaku Santri *
-              </label>
-              <textarea
-                rows={3}
-                required
-                placeholder="Tuliskan evaluasi sikap, komitmen perbaikan, dan respon santri terhadap pembinaan..."
-                value={catatanPerubahanInput}
-                onChange={(e) => setCatatanPerubahanInput(e.target.value)}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs font-sans"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-[#1a1c1a]">
-              <button
-                type="button"
-                onClick={() => setStatusModalRecord(null)}
-                className="neo-btn-outline"
-              >
-                BATAL
-              </button>
-              <button type="submit" className="neo-btn-primary">
-                SIMPAN PERUBAHAN STATUS
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
-
-      {/* MODAL KONFIRMASI HAPUS */}
-      <Modal
-        isOpen={!!deletingRecord}
-        onClose={() => setDeletingRecord(null)}
-        title="Hapus Catatan Pembinaan"
-        subtitle="KONFIRMASI PENGHAPUSAN"
-        maxWidth="sm"
-      >
-        <div className="space-y-4 text-xs font-mono-custom">
-          <p className="text-stone-700 font-sans leading-relaxed">
-            Apakah Anda yakin ingin menghapus catatan pelanggaran & pembinaan untuk santri{' '}
-            <strong>{getSiswa(deletingRecord?.siswaId)?.nama}</strong>?
-          </p>
-          <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-900 text-[11px]">
-            Tindakan ini tidak dapat dibatalkan.
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2 border-t border-[#1a1c1a]">
-            <button
-              type="button"
-              onClick={() => setDeletingRecord(null)}
-              className="neo-btn-outline"
-            >
-              BATAL
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmDelete}
-              className="px-3 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a]"
-            >
-              HAPUS CATATAN
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 };

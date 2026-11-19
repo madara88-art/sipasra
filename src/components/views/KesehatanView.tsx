@@ -1,36 +1,29 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   HeartPulse,
   Plus,
   Thermometer,
-  Pill,
   Clock,
   CheckCircle2,
   AlertCircle,
   MapPin,
   Calendar,
   Search,
-  Filter,
-  Download,
   Activity,
   Eye,
   Smile,
   Scissors,
   Sparkles,
-  UserCheck,
-  Building2,
   Trash2,
   Edit3,
   Phone,
-  ArrowRight,
   FileSpreadsheet,
-  AlertTriangle,
   Stethoscope,
-  Info,
+  X,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useApp } from '../../context/AppContext';
-import { CatatanKesehatan, PemeriksaanCKG, Siswa } from '../../types';
+import { CatatanKesehatan, PemeriksaanCKG } from '../../types';
 import { Modal } from '../common/Modal';
 
 export const KesehatanView: React.FC = () => {
@@ -63,17 +56,25 @@ export const KesehatanView: React.FC = () => {
   const [filterGigiCKG, setFilterGigiCKG] = useState<string>('Semua');
   const [filterPenglihatanCKG, setFilterPenglihatanCKG] = useState<string>('Semua');
 
-  // Modal states for Pemeriksaan Kesehatan
-  const [isAddKesModalOpen, setIsAddKesModalOpen] = useState(false);
+  // Inline form & notification states for Pemeriksaan Kesehatan
+  const [isKesFormOpen, setIsKesFormOpen] = useState(false);
   const [editingKes, setEditingKes] = useState<CatatanKesehatan | null>(null);
+  const [deleteKesTarget, setDeleteKesTarget] = useState<{ id: string; nama: string } | null>(null);
+  const [deleteCKGTarget, setDeleteCKGTarget] = useState<{ id: string; nama: string } | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [kesFormError, setKesFormError] = useState<string | null>(null);
+
   const [selectedRecordToUpdate, setSelectedRecordToUpdate] = useState<CatatanKesehatan | null>(null);
   const [quickUpdateKondisi, setQuickUpdateKondisi] = useState<string>('Sembuh');
   const [quickUpdateCatatan, setQuickUpdateCatatan] = useState('');
+
+  const kesFormRef = useRef<HTMLDivElement>(null);
 
   // Form state for Pemeriksaan Kesehatan
   const defaultKesForm = {
     tanggal: new Date().toISOString().split('T')[0],
     siswaId: siswaList[0]?.id || '',
+    namaSiswa: '',
     kamar: '',
     waliAsuh: '',
     kondisi: 'Dalam Perawatan',
@@ -105,6 +106,19 @@ export const KesehatanView: React.FC = () => {
   };
   const [ckgFormData, setCkgFormData] = useState(defaultCKGForm);
 
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
+
+  const scrollToKesForm = () => {
+    setTimeout(() => {
+      kesFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
+
   // Synchronize kamar & wali asuh when siswaId changes in Kes Form
   const handleSiswaChangeInKesForm = (id: string) => {
     const s = getSiswa(id);
@@ -113,35 +127,42 @@ export const KesehatanView: React.FC = () => {
     setKesFormData((prev) => ({
       ...prev,
       siswaId: id,
-      kamar: k?.nama || '',
-      waliAsuh: w?.nama || '',
+      namaSiswa: s?.nama || prev.namaSiswa,
+      kamar: k?.nama || (id ? '' : prev.kamar),
+      waliAsuh: w?.nama || (id ? '' : prev.waliAsuh),
     }));
   };
 
-  // Open add modal for Pemeriksaan Kesehatan
+  // Open inline form for Catatan Pemeriksaan Baru
   const handleOpenAddKes = () => {
     const firstSiswa = siswaList[0];
     const k = getKamar(firstSiswa?.kamarId);
     const w = getWaliAsuh(firstSiswa?.waliAsuhId);
     setKesFormData({
       ...defaultKesForm,
+      tanggal: new Date().toISOString().split('T')[0],
       siswaId: firstSiswa?.id || '',
+      namaSiswa: firstSiswa?.nama || '',
       kamar: k?.nama || '',
       waliAsuh: w?.nama || '',
     });
+    setKesFormError(null);
     setEditingKes(null);
-    setIsAddKesModalOpen(true);
+    setIsKesFormOpen(true);
+    scrollToKesForm();
   };
 
-  // Open edit modal for Pemeriksaan Kesehatan
+  // Open inline form for Edit Pemeriksaan Kesehatan
   const handleOpenEditKes = (item: CatatanKesehatan) => {
     const s = getSiswa(item.siswaId);
     const k = getKamar(s?.kamarId);
     const w = getWaliAsuh(s?.waliAsuhId);
     setEditingKes(item);
+    setKesFormError(null);
     setKesFormData({
       tanggal: item.tanggal,
       siswaId: item.siswaId,
+      namaSiswa: item.namaSiswa || s?.nama || '',
       kamar: item.kamar || k?.nama || '',
       waliAsuh: item.waliAsuh || w?.nama || '',
       kondisi: item.kondisi || item.status || 'Dalam Perawatan',
@@ -152,30 +173,40 @@ export const KesehatanView: React.FC = () => {
       suhuTubuh: item.suhuTubuh || '37.0 °C',
       lokasiPerawatan: item.lokasiPerawatan || 'Ruang UKS',
     });
-    setIsAddKesModalOpen(true);
+    setIsKesFormOpen(true);
+    scrollToKesForm();
   };
 
   // Save Pemeriksaan Kesehatan (Add or Edit)
   const handleSaveKes = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!kesFormData.keluhan.trim() || !kesFormData.penanganan.trim()) {
-      alert('Mohon lengkapi data keluhan dan penanganan.');
+    const resolvedSiswa = kesFormData.siswaId ? getSiswa(kesFormData.siswaId) : undefined;
+    const resolvedNama = resolvedSiswa?.nama || kesFormData.namaSiswa.trim();
+
+    if (!resolvedNama) {
+      setKesFormError('Pilih santri atau isi nama anak terlebih dahulu.');
       return;
     }
+    if (!kesFormData.keluhan.trim() || !kesFormData.penanganan.trim()) {
+      setKesFormError('Mohon lengkapi data keluhan dan penanganan medis.');
+      return;
+    }
+    setKesFormError(null);
 
     const payload = {
       tanggal: kesFormData.tanggal,
       siswaId: kesFormData.siswaId,
-      kamar: kesFormData.kamar,
-      waliAsuh: kesFormData.waliAsuh,
+      namaSiswa: resolvedNama,
+      kamar: kesFormData.kamar.trim(),
+      waliAsuh: kesFormData.waliAsuh.trim(),
       kondisi: kesFormData.kondisi,
-      keluhan: kesFormData.keluhan,
-      penanganan: kesFormData.penanganan,
+      keluhan: kesFormData.keluhan.trim(),
+      penanganan: kesFormData.penanganan.trim(),
       rujukan: kesFormData.rujukan,
-      catatan: kesFormData.catatan,
-      suhuTubuh: kesFormData.suhuTubuh,
+      catatan: kesFormData.catatan.trim(),
+      suhuTubuh: kesFormData.suhuTubuh.trim(),
       lokasiPerawatan: kesFormData.lokasiPerawatan,
-      penangananObat: kesFormData.penanganan,
+      penangananObat: kesFormData.penanganan.trim(),
       jadwalObat: 'Sesuai resep UKS',
       status: (kesFormData.kondisi === 'Sembuh'
         ? 'Sembuh'
@@ -185,15 +216,18 @@ export const KesehatanView: React.FC = () => {
         ? 'Rujuk Medis'
         : 'Dalam Perawatan') as CatatanKesehatan['status'],
       dicatatOleh: kesFormData.waliAsuh ? `${kesFormData.waliAsuh} & Tim UKS` : 'Tim UKS & Wali Asuh',
-      catatanPerkembangan: kesFormData.catatan,
+      catatanPerkembangan: kesFormData.catatan.trim(),
     };
 
     if (editingKes) {
       updateKesehatan(editingKes.id, payload);
+      showToast(`✓ Catatan pemeriksaan untuk ${resolvedNama} berhasil diperbarui.`);
     } else {
       addKesehatan(payload);
+      showToast(`✓ Catatan pemeriksaan baru untuk ${resolvedNama} berhasil disimpan.`);
     }
-    setIsAddKesModalOpen(false);
+    setIsKesFormOpen(false);
+    setEditingKes(null);
   };
 
   // Save quick condition update
@@ -213,13 +247,19 @@ export const KesehatanView: React.FC = () => {
       catatanPerkembangan: quickUpdateCatatan || selectedRecordToUpdate.catatanPerkembangan,
     });
     setSelectedRecordToUpdate(null);
+    showToast('✓ Perkembangan kondisi santri berhasil diperbarui.');
   };
 
-  // Delete Pemeriksaan Kesehatan record
-  const handleDeleteKes = (id: string, namaSiswa: string) => {
-    if (window.confirm(`Yakin ingin menghapus catatan pemeriksaan untuk ${namaSiswa}?`)) {
-      deleteKesehatan(id);
+  // Delete Pemeriksaan Kesehatan record (inline confirm)
+  const handleConfirmDeleteKes = () => {
+    if (!deleteKesTarget) return;
+    deleteKesehatan(deleteKesTarget.id);
+    if (editingKes?.id === deleteKesTarget.id) {
+      setIsKesFormOpen(false);
+      setEditingKes(null);
     }
+    showToast(`✓ Catatan pemeriksaan ${deleteKesTarget.nama} berhasil dihapus.`);
+    setDeleteKesTarget(null);
   };
 
   // Open add CKG Modal
@@ -265,27 +305,31 @@ export const KesehatanView: React.FC = () => {
 
     if (editingCKG) {
       updateCKG(editingCKG.id, payload);
+      showToast('✓ Data pemeriksaan berkala (CKG) berhasil diperbarui.');
     } else {
       addCKG(payload);
+      showToast('✓ Data pemeriksaan berkala (CKG) berhasil disimpan.');
     }
     setIsAddCKGModalOpen(false);
   };
 
-  // Delete CKG
-  const handleDeleteCKG = (id: string, namaSiswa: string) => {
-    if (window.confirm(`Yakin ingin menghapus data CKG untuk ${namaSiswa}?`)) {
-      deleteCKG(id);
-    }
+  // Delete CKG (inline confirm)
+  const handleConfirmDeleteCKG = () => {
+    if (!deleteCKGTarget) return;
+    deleteCKG(deleteCKGTarget.id);
+    showToast(`✓ Data CKG ${deleteCKGTarget.nama} berhasil dihapus.`);
+    setDeleteCKGTarget(null);
   };
 
   // Filtered Pemeriksaan Kesehatan List
   const filteredKesehatanList = useMemo(() => {
     return kesehatanList.filter((item) => {
       const siswa = getSiswa(item.siswaId);
+      const displayName = siswa?.nama || item.namaSiswa || '';
       const matchSearch =
         !searchPemeriksaan ||
-        siswa?.nama.toLowerCase().includes(searchPemeriksaan.toLowerCase()) ||
-        siswa?.panggilan.toLowerCase().includes(searchPemeriksaan.toLowerCase()) ||
+        displayName.toLowerCase().includes(searchPemeriksaan.toLowerCase()) ||
+        (siswa?.panggilan && siswa.panggilan.toLowerCase().includes(searchPemeriksaan.toLowerCase())) ||
         item.keluhan.toLowerCase().includes(searchPemeriksaan.toLowerCase()) ||
         item.penanganan.toLowerCase().includes(searchPemeriksaan.toLowerCase()) ||
         (item.rujukan && item.rujukan.toLowerCase().includes(searchPemeriksaan.toLowerCase()));
@@ -365,7 +409,7 @@ export const KesehatanView: React.FC = () => {
       return {
         No: idx + 1,
         Tanggal: item.tanggal,
-        'Nama Santri': siswa?.nama || '-',
+        'Nama Santri': siswa?.nama || item.namaSiswa || '-',
         Kelas: siswa?.kelas || '-',
         Kamar: item.kamar || kamar?.nama || '-',
         'Wali Asuh': item.waliAsuh || wali?.nama || '-',
@@ -509,6 +553,23 @@ export const KesehatanView: React.FC = () => {
         </div>
       </div>
 
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="p-3 bg-emerald-50 border-[1.5px] border-[#006b54] text-[#006b54] font-mono-custom text-xs font-bold flex items-center justify-between shadow-[2.5px_2.5px_0px_#1a1c1a]">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-[#006b54]" />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="text-[10px] uppercase font-bold hover:underline ml-3 cursor-pointer"
+          >
+            TUTUP
+          </button>
+        </div>
+      )}
+
       {/* ========================================================= */}
       {/* TAB 1: PEMERIKSAAN KESEHATAN (Rekam Medis & Sakit Santri) */}
       {/* ========================================================= */}
@@ -598,11 +659,13 @@ export const KesehatanView: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={handleOpenAddKes}
-                  className="neo-btn-primary flex items-center gap-1.5 text-xs py-2 px-3.5"
+                  onClick={() =>
+                    isKesFormOpen && !editingKes ? setIsKesFormOpen(false) : handleOpenAddKes()
+                  }
+                  className="neo-btn-primary flex items-center gap-1.5 text-xs py-2 px-3.5 cursor-pointer"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>CATAT PEMERIKSAAN BARU</span>
+                  {isKesFormOpen && !editingKes ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                  <span>{isKesFormOpen && !editingKes ? 'TUTUP FORM' : 'CATAT PEMERIKSAAN BARU'}</span>
                 </button>
               </div>
             </div>
@@ -639,6 +702,328 @@ export const KesehatanView: React.FC = () => {
             </div>
           </div>
 
+          {/* INLINE FORM CATATAN PEMERIKSAAN BARU / EDIT */}
+          <div ref={kesFormRef}>
+            {isKesFormOpen && (
+              <div className="bg-white border-[1.5px] border-[#1a1c1a] shadow-[5px_5px_0px_#006b54] p-5 sm:p-6">
+                <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b-[1.5px] border-[#1a1c1a]">
+                  <div>
+                    <span className="text-[10px] font-mono-custom font-bold uppercase tracking-wider text-[#006b54] block">
+                      // UNIT KESEHATAN SANTRI (UKS)
+                    </span>
+                    <h2 className="font-syne text-xl font-extrabold text-[#1a1c1a] tracking-tight">
+                      {editingKes ? 'Form Edit Pemeriksaan Kesehatan' : 'Form Catatan Pemeriksaan Baru'}
+                    </h2>
+                    <p className="text-xs font-mono-custom text-[#1a1c1a]/65 mt-0.5">
+                      Catat tanggal pemeriksaan, identitas anak, keluhan, suhu tubuh, penanganan UKS, dan rujukan faskes.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsKesFormOpen(false);
+                      setEditingKes(null);
+                    }}
+                    className="p-1.5 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
+                    aria-label="Tutup form catatan pemeriksaan"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {kesFormError && (
+                  <div
+                    role="alert"
+                    className="mb-4 p-3 bg-rose-50 border border-rose-400 text-rose-900 text-xs font-medium flex items-center gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                    <span>{kesFormError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveKes} className="space-y-4 text-xs sm:text-sm">
+                  {/* Row 1: Tanggal & Nama Anak */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        1. Tanggal Pemeriksaan *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={kesFormData.tanggal}
+                        onChange={(e) => setKesFormData({ ...kesFormData, tanggal: e.target.value })}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs font-mono-custom focus:outline-none focus:border-[#006b54]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        2. Nama Anak (Santri) *
+                      </label>
+                      {siswaList.length > 0 ? (
+                        <select
+                          value={kesFormData.siswaId}
+                          onChange={(e) => {
+                            handleSiswaChangeInKesForm(e.target.value);
+                            if (kesFormError) setKesFormError(null);
+                          }}
+                          className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs font-mono-custom focus:outline-none focus:border-[#006b54]"
+                        >
+                          <option value="">-- Input Manual / Santri Belum Terdaftar --</option>
+                          {siswaList.map((s) => {
+                            const k = getKamar(s.kamarId);
+                            return (
+                              <option key={s.id} value={s.id}>
+                                {s.nama} ({s.kelas} - Kamar {k?.nama || '-'})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          required
+                          placeholder="Ketik nama santri yang diperiksa..."
+                          value={kesFormData.namaSiswa}
+                          onChange={(e) => {
+                            setKesFormData({ ...kesFormData, namaSiswa: e.target.value });
+                            if (kesFormError) setKesFormError(null);
+                          }}
+                          className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs font-sans focus:outline-none focus:border-[#006b54]"
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Manual Name Input if user selects manual option when siswaList > 0 */}
+                  {siswaList.length > 0 && !kesFormData.siswaId && (
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        Nama Anak (Input Manual) *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ketik nama santri..."
+                        value={kesFormData.namaSiswa}
+                        onChange={(e) => {
+                          setKesFormData({ ...kesFormData, namaSiswa: e.target.value });
+                          if (kesFormError) setKesFormError(null);
+                        }}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs font-sans focus:outline-none focus:border-[#006b54]"
+                      />
+                    </div>
+                  )}
+
+                  {/* Row 2: Kamar & Wali Asuh */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        3. Kamar Asrama
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Kamar 01 / Neptunus"
+                        value={kesFormData.kamar}
+                        onChange={(e) => setKesFormData({ ...kesFormData, kamar: e.target.value })}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        4. Wali Asuh / Pamong Pendamping
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Ust. Jendral, S.Pd.I"
+                        value={kesFormData.waliAsuh}
+                        onChange={(e) => setKesFormData({ ...kesFormData, waliAsuh: e.target.value })}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 3: Kondisi & Suhu Tubuh */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        5. Kondisi Santri *
+                      </label>
+                      <select
+                        value={kesFormData.kondisi}
+                        onChange={(e) => setKesFormData({ ...kesFormData, kondisi: e.target.value })}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:border-[#006b54] bg-[#fdfcf9] font-bold"
+                      >
+                        <option value="Dalam Perawatan">Dalam Perawatan (Rawat di UKS / Kamar)</option>
+                        <option value="Observasi">Observasi (Perlu Pemantauan Rutin)</option>
+                        <option value="Sembuh">Sembuh (Pulih & Bugar Kembali)</option>
+                        <option value="Perlu Istirahat">Perlu Istirahat Ekstra</option>
+                        <option value="Rujuk Medis">Rujuk Medis ke Puskesmas / RS</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        Suhu Tubuh (Termometer)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: 38.2 °C"
+                        value={kesFormData.suhuTubuh}
+                        onChange={(e) => setKesFormData({ ...kesFormData, suhuTubuh: e.target.value })}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs font-mono-custom focus:outline-none focus:border-[#006b54]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 4: Keluhan & Penanganan */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        6. Keluhan & Gejala Sakit *
+                      </label>
+                      <textarea
+                        rows={2}
+                        required
+                        placeholder="Contoh: Demam tinggi sejak subuh, pusing kepala, batuk..."
+                        value={kesFormData.keluhan}
+                        onChange={(e) => {
+                          setKesFormData({ ...kesFormData, keluhan: e.target.value });
+                          if (kesFormError) setKesFormError(null);
+                        }}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs font-sans focus:outline-none focus:border-[#006b54]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        7. Penanganan & Tindakan Medis *
+                      </label>
+                      <textarea
+                        rows={2}
+                        required
+                        placeholder="Contoh: Diberikan sirup Paracetamol, kompres hangat, istirahat di UKS..."
+                        value={kesFormData.penanganan}
+                        onChange={(e) => {
+                          setKesFormData({ ...kesFormData, penanganan: e.target.value });
+                          if (kesFormError) setKesFormError(null);
+                        }}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs font-sans focus:outline-none focus:border-[#006b54]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 5: Rujukan & Lokasi Perawatan */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        8. Rujukan Medis
+                      </label>
+                      <select
+                        value={kesFormData.rujukan}
+                        onChange={(e) => setKesFormData({ ...kesFormData, rujukan: e.target.value })}
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:border-[#006b54] bg-[#fdfcf9]"
+                      >
+                        <option value="Tidak Perlu Rujukan (Cukup Rawat UKS Asrama)">Tidak Perlu Rujukan (Cukup UKS)</option>
+                        <option value="Puskesmas Tahunan Jepara">Puskesmas Tahunan Jepara</option>
+                        <option value="RSUD R.A. Kartini Jepara">RSUD R.A. Kartini Jepara</option>
+                        <option value="Klinik Pratama Jepara">Klinik Pratama Jepara</option>
+                        <option value="Dokter Spesialis Anak">Dokter Spesialis Anak</option>
+                        <option value="Dokter Gigi Puskesmas">Dokter Gigi Puskesmas</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                        Lokasi Perawatan Asrama
+                      </label>
+                      <select
+                        value={kesFormData.lokasiPerawatan}
+                        onChange={(e) =>
+                          setKesFormData({
+                            ...kesFormData,
+                            lokasiPerawatan: e.target.value as any,
+                          })
+                        }
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:border-[#006b54] bg-[#fdfcf9]"
+                      >
+                        <option value="Ruang UKS">Ruang UKS Asrama (Ranjang Medis)</option>
+                        <option value="Kamar Asrama">Kamar Asrama Santri</option>
+                        <option value="Puskesmas Tahunan">Puskesmas Tahunan</option>
+                        <option value="RSUD RA Kartini Jepara">RSUD RA Kartini Jepara</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Row 6: Catatan */}
+                  <div>
+                    <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
+                      9. Catatan Pemantauan & Instruksi
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="Contoh: Suhu tubuh dipantau setiap 4 jam. Orang tua santri sudah dihubungi via WA."
+                      value={kesFormData.catatan}
+                      onChange={(e) => setKesFormData({ ...kesFormData, catatan: e.target.value })}
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs font-sans focus:outline-none focus:border-[#006b54]"
+                    />
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-[#1a1c1a]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsKesFormOpen(false);
+                        setEditingKes(null);
+                      }}
+                      className="neo-btn-outline py-2 px-4 text-xs cursor-pointer"
+                    >
+                      BATAL
+                    </button>
+                    <button
+                      type="submit"
+                      className="neo-btn-primary py-2 px-5 text-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>{editingKes ? 'SIMPAN PERUBAHAN' : 'SIMPAN CATATAN PEMERIKSAAN'}</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+
+          {/* Inline Delete Confirmation for Pemeriksaan Kesehatan */}
+          {deleteKesTarget && (
+            <div className="p-4 bg-rose-50 border-[1.5px] border-rose-700 shadow-[3px_3px_0px_#9f1239] flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-mono-custom text-xs">
+              <div className="text-rose-950">
+                <span className="font-bold block">Konfirmasi Hapus Catatan Pemeriksaan</span>
+                <span className="font-sans">
+                  Yakin ingin menghapus catatan pemeriksaan untuk <strong>{deleteKesTarget.nama}</strong>?
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setDeleteKesTarget(null)}
+                  className="px-3 py-1.5 bg-white border-[1.5px] border-[#1a1c1a] font-bold uppercase cursor-pointer"
+                >
+                  BATAL
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteKes}
+                  className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white border-[1.5px] border-[#1a1c1a] font-bold uppercase cursor-pointer"
+                >
+                  YA, HAPUS
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Table of Pemeriksaan Kesehatan */}
           <div className="bg-white border-[1.5px] border-[#1a1c1a] neo-shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
@@ -660,8 +1045,22 @@ export const KesehatanView: React.FC = () => {
                 <tbody className="divide-y divide-[#1a1c1a]/15">
                   {filteredKesehatanList.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="p-8 text-center text-slate-500 font-mono-custom">
-                        Tidak ada catatan pemeriksaan kesehatan yang cocok dengan filter.
+                      <td colSpan={10} className="p-8 text-center text-slate-500 font-mono-custom space-y-3">
+                        <p>
+                          {kesehatanList.length === 0
+                            ? 'Belum ada catatan pemeriksaan kesehatan santri.'
+                            : 'Tidak ada catatan pemeriksaan kesehatan yang cocok dengan filter.'}
+                        </p>
+                        {kesehatanList.length === 0 && !isKesFormOpen && (
+                          <button
+                            type="button"
+                            onClick={handleOpenAddKes}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#006b54] text-white font-bold text-xs border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Catat Pemeriksaan Baru</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ) : (
@@ -692,10 +1091,12 @@ export const KesehatanView: React.FC = () => {
                           {/* Nama Anak */}
                           <td className="p-3">
                             <div className="font-bold text-sm text-[#1a1c1a]">
-                              {siswa?.nama || 'Santri'}
+                              {siswa?.nama || item.namaSiswa || 'Santri'}
                             </div>
                             <div className="font-mono-custom text-[11px] text-[#1a1c1a]/60">
-                              {siswa?.kelas} · {siswa?.panggilan} (NISN: {siswa?.nisn})
+                              {siswa
+                                ? `${siswa.kelas} · ${siswa.panggilan} (NISN: ${siswa.nisn})`
+                                : 'Input Manual UKS'}
                             </div>
                           </td>
 
@@ -783,17 +1184,17 @@ export const KesehatanView: React.FC = () => {
                                     setQuickUpdateKondisi('Sembuh');
                                     setQuickUpdateCatatan('Kondisi sudah pulih, demam reda, siap kembali aktif di kelas.');
                                   }}
-                                  className="neo-btn-primary text-[10px] py-1 px-2 font-mono-custom"
+                                  className="neo-btn-primary text-[10px] py-1 px-2 font-mono-custom cursor-pointer"
                                   title="Tandai sembuh dan pulih"
                                 >
-                                  SEMBIS PULIH
+                                  TANDAI SEMBUH
                                 </button>
                               )}
 
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditKes(item)}
-                                className="neo-btn-outline p-1.5"
+                                className="neo-btn-outline p-1.5 cursor-pointer"
                                 title="Edit pemeriksaan ini"
                               >
                                 <Edit3 className="w-3.5 h-3.5 text-slate-700" />
@@ -813,8 +1214,13 @@ export const KesehatanView: React.FC = () => {
 
                               <button
                                 type="button"
-                                onClick={() => handleDeleteKes(item.id, siswa?.nama || 'Santri')}
-                                className="neo-btn-outline p-1.5 hover:bg-rose-50 hover:text-rose-700"
+                                onClick={() =>
+                                  setDeleteKesTarget({
+                                    id: item.id,
+                                    nama: siswa?.nama || item.namaSiswa || 'Santri',
+                                  })
+                                }
+                                className="neo-btn-outline p-1.5 hover:bg-rose-50 hover:text-rose-700 cursor-pointer"
                                 title="Hapus catatan"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -965,6 +1371,34 @@ export const KesehatanView: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Inline Delete Confirmation for CKG */}
+          {deleteCKGTarget && (
+            <div className="p-4 bg-rose-50 border-[1.5px] border-rose-700 shadow-[3px_3px_0px_#9f1239] flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-mono-custom text-xs">
+              <div className="text-rose-950">
+                <span className="font-bold block">Konfirmasi Hapus Data CKG</span>
+                <span className="font-sans">
+                  Yakin ingin menghapus data CKG untuk <strong>{deleteCKGTarget.nama}</strong>?
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setDeleteCKGTarget(null)}
+                  className="px-3 py-1.5 bg-white border-[1.5px] border-[#1a1c1a] font-bold uppercase cursor-pointer"
+                >
+                  BATAL
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteCKG}
+                  className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white border-[1.5px] border-[#1a1c1a] font-bold uppercase cursor-pointer"
+                >
+                  YA, HAPUS
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Table of CKG */}
           <div className="bg-white border-[1.5px] border-[#1a1c1a] neo-shadow-sm overflow-hidden">
@@ -1126,8 +1560,13 @@ export const KesehatanView: React.FC = () => {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleDeleteCKG(item.id, siswa?.nama || 'Santri')}
-                                className="neo-btn-outline p-1.5 hover:bg-rose-50 hover:text-rose-700"
+                                onClick={() =>
+                                  setDeleteCKGTarget({
+                                    id: item.id,
+                                    nama: siswa?.nama || 'Santri',
+                                  })
+                                }
+                                className="neo-btn-outline p-1.5 hover:bg-rose-50 hover:text-rose-700 cursor-pointer"
                                 title="Hapus catatan CKG"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -1145,221 +1584,7 @@ export const KesehatanView: React.FC = () => {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODAL 1: FORM TAMBAH / EDIT PEMERIKSAAN KESEHATAN        */}
-      {/* ========================================================= */}
-      <Modal
-        isOpen={isAddKesModalOpen}
-        onClose={() => setIsAddKesModalOpen(false)}
-        title={editingKes ? 'Edit Pemeriksaan Kesehatan' : 'Catat Pemeriksaan Kesehatan Baru'}
-        subtitle="Unit Kesehatan Santri (UKS) - Sekolah Rakyat 1 Jepara"
-        maxWidth="xl"
-      >
-        <form onSubmit={handleSaveKes} className="space-y-4 text-xs sm:text-sm">
-          {/* Row 1: Tanggal & Nama Anak */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-                1. Tanggal Pemeriksaan *
-              </label>
-              <input
-                type="date"
-                required
-                value={kesFormData.tanggal}
-                onChange={(e) => setKesFormData({ ...kesFormData, tanggal: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:ring-1 focus:ring-[#006b54]"
-              />
-            </div>
 
-            <div>
-              <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-                2. Nama Anak (Santri) *
-              </label>
-              <select
-                required
-                value={kesFormData.siswaId}
-                onChange={(e) => handleSiswaChangeInKesForm(e.target.value)}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:ring-1 focus:ring-[#006b54] bg-white"
-              >
-                {siswaList.map((s) => {
-                  const k = getKamar(s.kamarId);
-                  return (
-                    <option key={s.id} value={s.id}>
-                      {s.nama} ({s.kelas} - Kamar {k?.nama || '-'})
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-          </div>
-
-          {/* Row 2: Kamar & Wali Asuh (Auto-populated with edit ability) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-                3. Kamar Asrama
-              </label>
-              <input
-                type="text"
-                placeholder="Contoh: Neptunus / Jupiter"
-                value={kesFormData.kamar}
-                onChange={(e) => setKesFormData({ ...kesFormData, kamar: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom bg-slate-50 focus:outline-none focus:ring-1 focus:ring-[#006b54]"
-              />
-            </div>
-
-            <div>
-              <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-                4. Wali Asuh / Pamong Pendamping
-              </label>
-              <input
-                type="text"
-                placeholder="Contoh: Ust. Jendral, S.Pd.I"
-                value={kesFormData.waliAsuh}
-                onChange={(e) => setKesFormData({ ...kesFormData, waliAsuh: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom bg-slate-50 focus:outline-none focus:ring-1 focus:ring-[#006b54]"
-              />
-            </div>
-          </div>
-
-          {/* Row 3: Kondisi & Suhu Tubuh */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-                5. Kondisi Santri *
-              </label>
-              <select
-                value={kesFormData.kondisi}
-                onChange={(e) => setKesFormData({ ...kesFormData, kondisi: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:ring-1 focus:ring-[#006b54] bg-white font-bold"
-              >
-                <option value="Dalam Perawatan">Dalam Perawatan (Rawat di UKS / Kamar)</option>
-                <option value="Observasi">Observasi (Perlu Pemantauan Rutin)</option>
-                <option value="Sembuh">Sembuh (Pulih & Bugar Kembali)</option>
-                <option value="Perlu Istirahat">Perlu Istirahat Ekstra</option>
-                <option value="Rujuk Medis">Rujuk Medis ke Puskesmas / RS</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-                Suhu Tubuh (Termometer)
-              </label>
-              <input
-                type="text"
-                placeholder="Contoh: 38.2 °C"
-                value={kesFormData.suhuTubuh}
-                onChange={(e) => setKesFormData({ ...kesFormData, suhuTubuh: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:ring-1 focus:ring-[#006b54]"
-              />
-            </div>
-          </div>
-
-          {/* Row 4: Keluhan */}
-          <div>
-            <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-              6. Keluhan & Gejala Sakit *
-            </label>
-            <textarea
-              rows={2}
-              required
-              placeholder="Contoh: Demam tinggi sejak subuh, pusing kepala, hidung tersumbat, batuk kering..."
-              value={kesFormData.keluhan}
-              onChange={(e) => setKesFormData({ ...kesFormData, keluhan: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:ring-1 focus:ring-[#006b54]"
-            />
-          </div>
-
-          {/* Row 5: Penanganan */}
-          <div>
-            <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-              7. Penanganan & Tindakan Medis *
-            </label>
-            <textarea
-              rows={2}
-              required
-              placeholder="Contoh: Diberikan sirup Paracetamol 120mg (3x1 sdm), kompres air hangat pada dahi, istirahat bed rest di UKS, dan perbanyak minum air hangat."
-              value={kesFormData.penanganan}
-              onChange={(e) => setKesFormData({ ...kesFormData, penanganan: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:ring-1 focus:ring-[#006b54]"
-            />
-          </div>
-
-          {/* Row 6: Rujukan */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-                8. Rujukan Medis
-              </label>
-              <select
-                value={kesFormData.rujukan}
-                onChange={(e) => setKesFormData({ ...kesFormData, rujukan: e.target.value })}
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:ring-1 focus:ring-[#006b54] bg-white"
-              >
-                <option value="Tidak Perlu Rujukan (Cukup Rawat UKS Asrama)">Tidak Perlu Rujukan (Cukup UKS)</option>
-                <option value="Puskesmas Tahunan Jepara">Puskesmas Tahunan Jepara</option>
-                <option value="RSUD R.A. Kartini Jepara">RSUD R.A. Kartini Jepara</option>
-                <option value="Klinik Pratama Jepara">Klinik Pratama Jepara</option>
-                <option value="Dokter Spesialis Anak">Dokter Spesialis Anak</option>
-                <option value="Dokter Gigi Puskesmas">Dokter Gigi Puskesmas</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-                Lokasi Perawatan Asrama
-              </label>
-              <select
-                value={kesFormData.lokasiPerawatan}
-                onChange={(e) =>
-                  setKesFormData({
-                    ...kesFormData,
-                    lokasiPerawatan: e.target.value as any,
-                  })
-                }
-                className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:ring-1 focus:ring-[#006b54] bg-white"
-              >
-                <option value="Ruang UKS">Ruang UKS Asrama (Ranjang Medis)</option>
-                <option value="Kamar Asrama">Kamar Asrama Santri</option>
-                <option value="Puskesmas Tahunan">Puskesmas Tahunan</option>
-                <option value="RSUD RA Kartini Jepara">RSUD RA Kartini Jepara</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Row 7: Catatan */}
-          <div>
-            <label className="block font-mono-custom text-xs font-bold text-[#1a1c1a] mb-1 uppercase">
-              9. Catatan Pemantauan & Instruksi
-            </label>
-            <textarea
-              rows={2}
-              placeholder="Contoh: Suhu tubuh dipantau setiap 4 jam. Orang tua santri sudah dihubungi via WA mengenai kondisi anak."
-              value={kesFormData.catatan}
-              onChange={(e) => setKesFormData({ ...kesFormData, catatan: e.target.value })}
-              className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] text-xs font-mono-custom focus:outline-none focus:ring-1 focus:ring-[#006b54]"
-            />
-          </div>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-3 border-t border-[#1a1c1a]/15">
-            <button
-              type="button"
-              onClick={() => setIsAddKesModalOpen(false)}
-              className="neo-btn-outline py-2 px-4 text-xs"
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              className="neo-btn-primary py-2 px-5 text-xs flex items-center gap-1.5"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>{editingKes ? 'Simpan Perubahan' : 'Simpan Pemeriksaan'}</span>
-            </button>
-          </div>
-        </form>
-      </Modal>
 
       {/* ========================================================= */}
       {/* MODAL 2: FORM INPUT / EDIT PEMERIKSAAN BERKALA (CKG)     */}
@@ -1588,7 +1813,7 @@ export const KesehatanView: React.FC = () => {
         isOpen={!!selectedRecordToUpdate}
         onClose={() => setSelectedRecordToUpdate(null)}
         title="Update Perkembangan Kondisi Santri"
-        subtitle={getSiswa(selectedRecordToUpdate?.siswaId)?.nama}
+        subtitle={getSiswa(selectedRecordToUpdate?.siswaId)?.nama || selectedRecordToUpdate?.namaSiswa}
         maxWidth="md"
       >
         <form onSubmit={handleSaveQuickUpdate} className="space-y-4 text-xs sm:text-sm">

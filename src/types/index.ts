@@ -1,9 +1,19 @@
+export type UserRole = 'Admin' | 'Wali Asrama' | 'Wali Asuh';
+
+export interface AuthUser {
+  username: string;
+  displayName: string;
+  role: UserRole;
+  waliAsuhId?: string;
+}
+
 export type MenuItemId =
   | 'dashboard'
   | 'siswa'
   | 'kamar'
   | 'wali-asuh'
   | 'kegiatan-harian'
+  | 'pergantian-shift'
   | 'kebersihan'
   | 'ibadah'
   | 'kesehatan'
@@ -11,6 +21,29 @@ export type MenuItemId =
   | 'perkembangan-anak'
   | 'pelanggaran'
   | 'laporan';
+
+export type ShiftPiketType =
+  | 'Pagi (05:00 - 13:00)'
+  | 'Sore (13:00 - 21:00)'
+  | 'Malam (21:00 - 05:00)'
+  | 'Pendamping Penuh';
+
+export interface CatatanPergantianShift {
+  id: string;
+  tanggal: string;
+  waktuSerahTerima: string;
+  dariShift: ShiftPiketType;
+  keShift: ShiftPiketType;
+  waliMenyerahkan: string;
+  waliMenerima: string;
+  jumlahSantriHadir: number;
+  jumlahSantriSakit: number;
+  jumlahSantriIzin: number;
+  ringkasanKondisi: string;
+  catatanPenting?: string;
+  perlengkapanDiserahkan?: string;
+  status: 'Selesai Serah Terima' | 'Menunggu Verifikasi';
+}
 
 export interface DokumenSiswa {
   foto?: string; // Data URL or Image URL
@@ -47,10 +80,26 @@ export interface Siswa {
     kotaAsal: string;
   };
   tanggalMasuk: string;
-  status: 'Aktif' | 'Izin Pulang' | 'Sakit';
+  status: 'Aktif' | 'Izin Pulang' | 'Sakit' | 'Mutasi Keluar';
   alergi?: string;
   catatanKhusus?: string;
   dokumen?: DokumenSiswa;
+}
+
+export interface MutasiRecord {
+  id: string;
+  tanggal: string;
+  siswaId: string;
+  namaSiswa: string;
+  jenisMutasi: 'Pindah Kamar' | 'Pindah Kelas' | 'Pindah Kamar & Kelas' | 'Mutasi Keluar';
+  dariKamar?: string;
+  keKamar?: string;
+  dariKelas?: string;
+  keKelas?: string;
+  dariWali?: string;
+  keWali?: string;
+  keterangan?: string;
+  petugas?: string;
 }
 
 export interface Kamar {
@@ -165,6 +214,7 @@ export interface CatatanKesehatan {
   id: string;
   tanggal: string;
   siswaId: string;
+  namaSiswa?: string;
   kondisi: 'Dalam Perawatan' | 'Observasi' | 'Sembuh' | 'Perlu Istirahat' | 'Rujuk Medis' | string;
   keluhan: string;
   penanganan: string;
@@ -203,6 +253,8 @@ export interface SesiKonseling {
   id: string;
   tanggal: string;
   siswaId: string;
+  namaSiswa?: string;
+  kamar?: string;
   kategori:
     | 'Homesick / Rindu Rumah'
     | 'Adaptasi Teman Sekamar'
@@ -235,6 +287,7 @@ export interface PerkembanganAnak {
   periodeEvaluasi: string; // e.g. "September 2026", "Agustus 2026"
   tanggalEvaluasi: string; // e.g. "2026-09-22"
   siswaId: string;
+  namaSiswa?: string;
   kamar?: string;
   waliAsuh?: string;
 
@@ -275,6 +328,7 @@ export interface PelanggaranPembinaan {
   tanggal: string; // Tanggal kejadian
   jam?: string; // Jam kejadian (contoh: "14:30")
   siswaId: string; // Nama siswa (relasi ID)
+  namaSiswa?: string; // Nama santri (fallback / input manual)
   kamar?: string; // Kamar santri
   lokasi?: string; // Lokasi kejadian
   jenisPelanggaran?: string; // Jenis pelanggaran (Kedisiplinan, Adab, Kebersihan, dll)

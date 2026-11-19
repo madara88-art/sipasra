@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
+  AuthUser,
   MenuItemId,
   Siswa,
   Kamar,
@@ -15,7 +16,10 @@ import {
   SesiKonseling,
   PerkembanganAnak,
   PelanggaranPembinaan,
+  MutasiRecord,
+  CatatanPergantianShift,
 } from '../types';
+import { authenticateUser } from '../data/authAccounts';
 import {
   INITIAL_SISWA,
   INITIAL_KAMAR,
@@ -32,6 +36,14 @@ import {
 } from '../data/initialData';
 
 interface AppContextType {
+  currentUser: AuthUser | null;
+  login: (
+    username: string,
+    password: string,
+    remember?: boolean
+  ) => { success: boolean; error?: string };
+  logout: () => void;
+
   activeMenu: MenuItemId;
   setActiveMenu: (menu: MenuItemId) => void;
   selectedSiswaId: string | null;
@@ -56,11 +68,24 @@ interface AppContextType {
   konselingList: SesiKonseling[];
   perkembanganList: PerkembanganAnak[];
   pelanggaranList: PelanggaranPembinaan[];
+  mutasiList: MutasiRecord[];
+  shiftLogList: CatatanPergantianShift[];
 
   // Mutators
   addSiswa: (siswa: Omit<Siswa, 'id'>) => void;
   updateSiswa: (id: string, siswa: Partial<Siswa>) => void;
   deleteSiswa: (id: string) => void;
+  deleteMultipleSiswa: (ids: string[]) => void;
+  clearAllSiswa: () => void;
+  mutateSiswa: (params: {
+    siswaIds: string[];
+    jenisMutasi: MutasiRecord['jenisMutasi'];
+    keKamarId?: string;
+    keWaliAsuhId?: string;
+    keKelas?: Siswa['kelas'];
+    tanggal: string;
+    keterangan?: string;
+  }) => number;
   importSiswaList: (
     items: Omit<Siswa, 'id'>[],
     mode: 'upsert' | 'append' | 'replace'
@@ -69,11 +94,17 @@ interface AppContextType {
   addKamar: (kamar: Omit<Kamar, 'id'>) => void;
   updateKamar: (id: string, kamar: Partial<Kamar>) => void;
   deleteKamar: (id: string) => void;
+  clearAllKamar: () => void;
 
   addWaliAsuh: (wali: Omit<WaliAsuh, 'id'>) => void;
   updateWaliAsuh: (id: string, wali: Partial<WaliAsuh>) => void;
+  deleteWaliAsuh: (id: string) => void;
+  clearAllWaliAsuh: () => void;
 
   addKegiatanHarian: (kegiatan: Omit<KegiatanHarianItem, 'id'>) => void;
+  updateKegiatanHarian: (id: string, kegiatan: Partial<KegiatanHarianItem>) => void;
+  deleteKegiatanHarian: (id: string) => void;
+  clearAllKegiatanHarian: () => void;
   updatePresensi: (presensi: PresensiKegiatan) => void;
 
   addKebersihan: (kebersihan: Omit<KebersihanKamar, 'id'>) => void;
@@ -96,6 +127,11 @@ interface AppContextType {
 
   addKonseling: (konseling: Omit<SesiKonseling, 'id'>) => void;
   updateKonseling: (id: string, konseling: Partial<SesiKonseling>) => void;
+  deleteKonseling: (id: string) => void;
+
+  addShiftLog: (item: Omit<CatatanPergantianShift, 'id'>) => void;
+  updateShiftLog: (id: string, data: Partial<CatatanPergantianShift>) => void;
+  deleteShiftLog: (id: string) => void;
 
   addPerkembangan: (perkembangan: Omit<PerkembanganAnak, 'id'>) => void;
   updatePerkembangan: (id: string, perkembangan: Partial<PerkembanganAnak>) => void;
@@ -118,24 +154,133 @@ const STORAGE_KEY = 'sipasra_jepara_data_v2';
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    try {
+      const savedLocal = localStorage.getItem(`${STORAGE_KEY}_auth_user`);
+      if (savedLocal) return JSON.parse(savedLocal) as AuthUser;
+      const savedSession = sessionStorage.getItem(`${STORAGE_KEY}_auth_user`);
+      if (savedSession) return JSON.parse(savedSession) as AuthUser;
+    } catch {
+      // ignore corrupted storage
+    }
+    return null;
+  });
+
   const [activeMenu, setActiveMenu] = useState<MenuItemId>('dashboard');
   const [selectedSiswaId, setSelectedSiswaId] = useState<string | null>(null);
   const [selectedKamarId, setSelectedKamarId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
 
+  const login = (
+    username: string,
+    password: string,
+    remember = true
+  ): { success: boolean; error?: string } => {
+    const result = authenticateUser(username, password);
+    if (!result.user) {
+      return { success: false, error: result.error || 'Login gagal.' };
+    }
+    setCurrentUser(result.user);
+    setActiveMenu('dashboard');
+    try {
+      if (remember) {
+        localStorage.setItem(`${STORAGE_KEY}_auth_user`, JSON.stringify(result.user));
+        sessionStorage.removeItem(`${STORAGE_KEY}_auth_user`);
+      } else {
+        sessionStorage.setItem(`${STORAGE_KEY}_auth_user`, JSON.stringify(result.user));
+        localStorage.removeItem(`${STORAGE_KEY}_auth_user`);
+      }
+    } catch {
+      // ignore storage quota errors
+    }
+    return { success: true };
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+    setMobileDrawerOpen(false);
+    try {
+      localStorage.removeItem(`${STORAGE_KEY}_auth_user`);
+      sessionStorage.removeItem(`${STORAGE_KEY}_auth_user`);
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  // One-time cleanup of legacy pre-seeded dummy student records
+  const [hasCleanedSeed] = useState<boolean>(() => {
+    try {
+      const flagKey = `${STORAGE_KEY}_cleared_seed_siswa_v1`;
+      if (!localStorage.getItem(flagKey)) {
+        [
+          `${STORAGE_KEY}_siswa`,
+          `${STORAGE_KEY}_presensi`,
+          `${STORAGE_KEY}_ibadah_v4`,
+          `${STORAGE_KEY}_kesehatan_v2`,
+          `${STORAGE_KEY}_ckg_v1`,
+          `${STORAGE_KEY}_konseling`,
+          `${STORAGE_KEY}_perkembangan_v2`,
+          `${STORAGE_KEY}_pelanggaran`,
+        ].forEach((k) => localStorage.removeItem(k));
+        localStorage.setItem(flagKey, 'true');
+        return true;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return false;
+  });
+
+  // One-time cleanup of legacy pre-seeded dummy kamar records
+  const [hasCleanedSeedKamar] = useState<boolean>(() => {
+    try {
+      const flagKey = `${STORAGE_KEY}_cleared_seed_kamar_v1`;
+      if (!localStorage.getItem(flagKey)) {
+        [
+          `${STORAGE_KEY}_kamar`,
+          `${STORAGE_KEY}_kebersihan`,
+          `${STORAGE_KEY}_kebersihan_v2`,
+        ].forEach((k) => localStorage.removeItem(k));
+        localStorage.setItem(flagKey, 'true');
+        return true;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return false;
+  });
+
+  // One-time cleanup of legacy pre-seeded dummy wali asuh records
+  const [hasCleanedSeedWali] = useState<boolean>(() => {
+    try {
+      const flagKey = `${STORAGE_KEY}_cleared_seed_wali_v1`;
+      if (!localStorage.getItem(flagKey)) {
+        localStorage.removeItem(`${STORAGE_KEY}_wali`);
+        localStorage.setItem(flagKey, 'true');
+        return true;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return false;
+  });
+
   // Load from local storage or initial
   const [siswaList, setSiswaList] = useState<Siswa[]>(() => {
+    if (hasCleanedSeed) return INITIAL_SISWA;
     const saved = localStorage.getItem(`${STORAGE_KEY}_siswa`);
     return saved ? JSON.parse(saved) : INITIAL_SISWA;
   });
 
   const [kamarList, setKamarList] = useState<Kamar[]>(() => {
+    if (hasCleanedSeedKamar) return INITIAL_KAMAR;
     const saved = localStorage.getItem(`${STORAGE_KEY}_kamar`);
     return saved ? JSON.parse(saved) : INITIAL_KAMAR;
   });
 
   const [waliAsuhList, setWaliAsuhList] = useState<WaliAsuh[]>(() => {
+    if (hasCleanedSeedWali) return INITIAL_WALI_ASUH;
     const saved = localStorage.getItem(`${STORAGE_KEY}_wali`);
     return saved ? JSON.parse(saved) : INITIAL_WALI_ASUH;
   });
@@ -145,7 +290,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= 20 && parsed[0]?.fokusPengasuhan) {
+        if (Array.isArray(parsed) && (parsed.length === 0 || parsed[0]?.namaKegiatan)) {
           return parsed;
         }
       } catch (e) {
@@ -162,6 +307,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [kebersihanList, setKebersihanList] = useState<KebersihanKamar[]>(() => {
+    if (hasCleanedSeedKamar) return INITIAL_KEBERSIHAN;
     const saved = localStorage.getItem(`${STORAGE_KEY}_kebersihan_v2`);
     if (saved) {
       try {
@@ -184,9 +330,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const parsed = JSON.parse(saved);
         if (
           Array.isArray(parsed) &&
-          parsed.length > 0 &&
-          typeof parsed[0].subuh === 'string' &&
-          (parsed[0].subuh === 'Melaksanakan' || parsed[0].subuh === 'Sakit')
+          (parsed.length === 0 ||
+            ['Melaksanakan', 'Sakit', 'Izin', 'Tidak Melaksanakan'].includes(parsed[0]?.subuh))
         ) {
           return parsed;
         }
@@ -218,7 +363,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.kemandirian?.status) {
+        if (
+          Array.isArray(parsed) &&
+          (parsed.length === 0 || parsed[0]?.kemandirian?.status)
+        ) {
           return parsed;
         }
       } catch (e) {
@@ -234,7 +382,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           return parsed.map((item: any) => {
             let status = item.status;
             if (status === 'Sedang Berjalan') status = 'Dalam Pembinaan';
@@ -254,6 +402,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
     return INITIAL_PELANGGARAN;
+  });
+
+  const [mutasiList, setMutasiList] = useState<MutasiRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_mutasi`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [shiftLogList, setShiftLogList] = useState<CatatanPergantianShift[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_shift_log`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
   });
 
   // Save changes to localStorage
@@ -305,6 +471,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(`${STORAGE_KEY}_pelanggaran`, JSON.stringify(pelanggaranList));
   }, [pelanggaranList]);
 
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY}_mutasi`, JSON.stringify(mutasiList));
+  }, [mutasiList]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY}_shift_log`, JSON.stringify(shiftLogList));
+  }, [shiftLogList]);
+
   // Resolvers
   const getSiswa = (id?: string) => (id ? siswaList.find((s) => s.id === id) : undefined);
   const getKamar = (id?: string) => (id ? kamarList.find((k) => k.id === id) : undefined);
@@ -325,6 +499,118 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteSiswa = (id: string) => {
     setSiswaList((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const deleteMultipleSiswa = (ids: string[]) => {
+    const idSet = new Set(ids);
+    setSiswaList((prev) => prev.filter((s) => !idSet.has(s.id)));
+  };
+
+  const clearAllSiswa = () => {
+    setSiswaList([]);
+    setPresensiList([]);
+    setIbadahList([]);
+    setKesehatanList([]);
+    setCkgList([]);
+    setKonselingList([]);
+    setPerkembanganList([]);
+    setPelanggaranList([]);
+    setMutasiList([]);
+    setSelectedSiswaId(null);
+  };
+
+  const mutateSiswa = (params: {
+    siswaIds: string[];
+    jenisMutasi: MutasiRecord['jenisMutasi'];
+    keKamarId?: string;
+    keWaliAsuhId?: string;
+    keKelas?: Siswa['kelas'];
+    tanggal: string;
+    keterangan?: string;
+  }): number => {
+    const idSet = new Set(params.siswaIds);
+    const targetKamar = params.keKamarId ? getKamar(params.keKamarId) : undefined;
+    const targetWali = params.keWaliAsuhId
+      ? getWaliAsuh(params.keWaliAsuhId)
+      : targetKamar?.waliAsuhId
+      ? getWaliAsuh(targetKamar.waliAsuhId)
+      : undefined;
+
+    const newMutasiLogs: MutasiRecord[] = [];
+    let movedCount = 0;
+
+    setSiswaList((prev) =>
+      prev.map((s) => {
+        if (!idSet.has(s.id)) return s;
+        movedCount++;
+
+        const dariKamar = getKamar(s.kamarId)?.nama || '-';
+        const dariWali = getWaliAsuh(s.waliAsuhId)?.nama || '-';
+        const dariKelas = s.kelas;
+
+        let nextKamarId = s.kamarId;
+        let nextWaliId = s.waliAsuhId;
+        let nextKelas = s.kelas;
+        let nextStatus = s.status;
+
+        if (
+          params.jenisMutasi === 'Pindah Kamar' ||
+          params.jenisMutasi === 'Pindah Kamar & Kelas'
+        ) {
+          if (params.keKamarId) nextKamarId = params.keKamarId;
+          if (params.keWaliAsuhId) nextWaliId = params.keWaliAsuhId;
+          else if (targetKamar?.waliAsuhId) nextWaliId = targetKamar.waliAsuhId;
+        }
+
+        if (
+          params.jenisMutasi === 'Pindah Kelas' ||
+          params.jenisMutasi === 'Pindah Kamar & Kelas'
+        ) {
+          if (params.keKelas) nextKelas = params.keKelas;
+        }
+
+        if (params.jenisMutasi === 'Mutasi Keluar') {
+          nextStatus = 'Mutasi Keluar';
+        } else if (s.status === 'Mutasi Keluar') {
+          nextStatus = 'Aktif';
+        }
+
+        newMutasiLogs.push({
+          id: `mut-${Date.now()}-${movedCount}`,
+          tanggal: params.tanggal,
+          siswaId: s.id,
+          namaSiswa: s.nama,
+          jenisMutasi: params.jenisMutasi,
+          dariKamar,
+          keKamar:
+            params.jenisMutasi === 'Mutasi Keluar'
+              ? 'Keluar Asrama'
+              : getKamar(nextKamarId)?.nama || dariKamar,
+          dariKelas,
+          keKelas: params.jenisMutasi === 'Mutasi Keluar' ? '-' : nextKelas,
+          dariWali,
+          keWali:
+            params.jenisMutasi === 'Mutasi Keluar'
+              ? '-'
+              : targetWali?.nama || getWaliAsuh(nextWaliId)?.nama || dariWali,
+          keterangan: params.keterangan?.trim() || undefined,
+          petugas: currentUser?.displayName || 'Admin',
+        });
+
+        return {
+          ...s,
+          kamarId: nextKamarId,
+          waliAsuhId: nextWaliId,
+          kelas: nextKelas,
+          status: nextStatus,
+        };
+      })
+    );
+
+    if (newMutasiLogs.length > 0) {
+      setMutasiList((prev) => [...newMutasiLogs, ...prev]);
+    }
+    return movedCount;
   };
 
   const importSiswaList = (
@@ -400,6 +686,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteKamar = (id: string) => {
     setKamarList((prev) => prev.filter((k) => k.id !== id));
+    setKebersihanList((prev) => prev.filter((keb) => keb.kamarId !== id));
+    setSiswaList((prev) => prev.map((s) => (s.kamarId === id ? { ...s, kamarId: '' } : s)));
+  };
+
+  const clearAllKamar = () => {
+    setKamarList([]);
+    setKebersihanList([]);
+    setSelectedKamarId(null);
+    setSiswaList((prev) => prev.map((s) => ({ ...s, kamarId: '' })));
   };
 
   const addWaliAsuh = (data: Omit<WaliAsuh, 'id'>) => {
@@ -414,12 +709,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setWaliAsuhList((prev) => prev.map((w) => (w.id === id ? { ...w, ...data } : w)));
   };
 
+  const deleteWaliAsuh = (id: string) => {
+    setWaliAsuhList((prev) => prev.filter((w) => w.id !== id));
+    setKamarList((prev) => prev.map((k) => (k.waliAsuhId === id ? { ...k, waliAsuhId: '' } : k)));
+    setSiswaList((prev) => prev.map((s) => (s.waliAsuhId === id ? { ...s, waliAsuhId: '' } : s)));
+  };
+
+  const clearAllWaliAsuh = () => {
+    setWaliAsuhList([]);
+    setKamarList((prev) => prev.map((k) => ({ ...k, waliAsuhId: '' })));
+    setSiswaList((prev) => prev.map((s) => ({ ...s, waliAsuhId: '' })));
+  };
+
   const addKegiatanHarian = (data: Omit<KegiatanHarianItem, 'id'>) => {
     const item: KegiatanHarianItem = {
       ...data,
       id: `keg-${Date.now()}`,
     };
     setKegiatanHarianList((prev) => [...prev, item]);
+  };
+
+  const updateKegiatanHarian = (id: string, data: Partial<KegiatanHarianItem>) => {
+    setKegiatanHarianList((prev) => prev.map((k) => (k.id === id ? { ...k, ...data } : k)));
+  };
+
+  const deleteKegiatanHarian = (id: string) => {
+    setKegiatanHarianList((prev) => prev.filter((k) => k.id !== id));
+    setPresensiList((prev) => prev.filter((p) => p.kegiatanId !== id));
+  };
+
+  const clearAllKegiatanHarian = () => {
+    setKegiatanHarianList([]);
+    setPresensiList([]);
   };
 
   const updatePresensi = (record: PresensiKegiatan) => {
@@ -598,6 +919,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setKonselingList((prev) => prev.map((k) => (k.id === id ? { ...k, ...data } : k)));
   };
 
+  const deleteKonseling = (id: string) => {
+    setKonselingList((prev) => prev.filter((k) => k.id !== id));
+  };
+
+  const addShiftLog = (data: Omit<CatatanPergantianShift, 'id'>) => {
+    const newItem: CatatanPergantianShift = {
+      ...data,
+      id: `shf-${Date.now()}`,
+    };
+    setShiftLogList((prev) => [newItem, ...prev]);
+  };
+
+  const updateShiftLog = (id: string, data: Partial<CatatanPergantianShift>) => {
+    setShiftLogList((prev) => prev.map((item) => (item.id === id ? { ...item, ...data } : item)));
+  };
+
+  const deleteShiftLog = (id: string) => {
+    setShiftLogList((prev) => prev.filter((item) => item.id !== id));
+  };
+
   const addPerkembangan = (data: Omit<PerkembanganAnak, 'id'>) => {
     const newItem: PerkembanganAnak = {
       ...data,
@@ -661,12 +1002,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setKonselingList(INITIAL_KONSELING);
     setPerkembanganList(INITIAL_PERKEMBANGAN);
     setPelanggaranList(INITIAL_PELANGGARAN);
+    setShiftLogList([]);
     localStorage.clear();
   };
 
   return (
     <AppContext.Provider
       value={{
+        currentUser,
+        login,
+        logout,
         activeMenu,
         setActiveMenu,
         selectedSiswaId,
@@ -689,16 +1034,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         konselingList,
         perkembanganList,
         pelanggaranList,
+        mutasiList,
+        shiftLogList,
         addSiswa,
         updateSiswa,
         deleteSiswa,
+        deleteMultipleSiswa,
+        clearAllSiswa,
+        mutateSiswa,
         importSiswaList,
         addKamar,
         updateKamar,
         deleteKamar,
+        clearAllKamar,
         addWaliAsuh,
         updateWaliAsuh,
+        deleteWaliAsuh,
+        clearAllWaliAsuh,
         addKegiatanHarian,
+        updateKegiatanHarian,
+        deleteKegiatanHarian,
+        clearAllKegiatanHarian,
         updatePresensi,
         addKebersihan,
         addIbadah,
@@ -713,6 +1069,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteCKG,
         addKonseling,
         updateKonseling,
+        deleteKonseling,
+        addShiftLog,
+        updateShiftLog,
+        deleteShiftLog,
         addPerkembangan,
         updatePerkembangan,
         deletePerkembangan,

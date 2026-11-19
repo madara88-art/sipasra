@@ -10,6 +10,7 @@ import { DataSiswaView } from './components/views/DataSiswaView';
 import { DataKamarView } from './components/views/DataKamarView';
 import { DataWaliAsuhView } from './components/views/DataWaliAsuhView';
 import { KegiatanHarianView } from './components/views/KegiatanHarianView';
+import { PergantianShiftView } from './components/views/PergantianShiftView';
 import { KebersihanView } from './components/views/KebersihanView';
 import { IbadahView } from './components/views/IbadahView';
 import { KesehatanView } from './components/views/KesehatanView';
@@ -17,9 +18,14 @@ import { KonselingView } from './components/views/KonselingView';
 import { PerkembanganAnakView } from './components/views/PerkembanganAnakView';
 import { PelanggaranView } from './components/views/PelanggaranView';
 import { LaporanView } from './components/views/LaporanView';
+import { LoginView } from './components/views/LoginView';
 
 const MainLayout: React.FC = () => {
-  const { activeMenu } = useApp();
+  const { activeMenu, currentUser } = useApp();
+
+  if (!currentUser) {
+    return <LoginView />;
+  }
 
   const renderActiveView = () => {
     switch (activeMenu) {
@@ -33,6 +39,8 @@ const MainLayout: React.FC = () => {
         return <DataWaliAsuhView />;
       case 'kegiatan-harian':
         return <KegiatanHarianView />;
+      case 'pergantian-shift':
+        return <PergantianShiftView />;
       case 'kebersihan':
         return <KebersihanView />;
       case 'ibadah':
@@ -57,7 +65,7 @@ const MainLayout: React.FC = () => {
       {/* Top Header */}
       <Header />
 
-      <div className="flex-1 flex max-w-7xl w-full mx-auto px-3 sm:px-5 md:px-6 py-5 gap-6">
+      <div className="flex-1 flex max-w-7xl w-full mx-auto px-3 sm:px-5 md:px-6 py-5 gap-6 print:max-w-none print:p-0 print:gap-0 print:block">
         {/* Desktop Sidebar Navigation */}
         <Sidebar />
 
