@@ -119,14 +119,22 @@ export const Sidebar: React.FC = () => {
         }`}
       >
         {/* Brand Header */}
-        <div className="p-5 border-b-[1.5px] border-[#1a1c1a] flex items-start justify-between">
-          <div className="brand">
-            <h1 className="font-syne text-[1.85rem] font-extrabold tracking-[-0.04em] text-[#006b54] leading-[0.9] mb-1">
-              SI-PASRA
-            </h1>
-            <p className="font-mono-custom text-[0.62rem] uppercase tracking-[0.1em] text-[#1a1c1a]/60 font-bold">
-              Sekolah Rakyat 1 Jepara
-            </p>
+        <div className="p-5 border-b-[1.5px] border-[#1a1c1a] flex items-start justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <img
+              src="/assets/aistudio/images__22__d75033cc.jpg"
+              alt="Logo Sekolah Rakyat"
+              referrerPolicy="no-referrer"
+              className="w-11 h-11 object-contain bg-white border-[1.5px] border-[#1a1c1a] p-0.5 shrink-0"
+            />
+            <div className="brand min-w-0">
+              <h1 className="font-syne text-[1.65rem] font-extrabold tracking-[-0.04em] text-[#006b54] leading-[0.95] mb-1">
+                SI-PASRA
+              </h1>
+              <p className="font-mono-custom text-[0.6rem] uppercase tracking-[0.08em] text-[#1a1c1a]/65 font-bold truncate">
+                Sekolah Rakyat 1 Jepara
+              </p>
+            </div>
           </div>
 
           <button

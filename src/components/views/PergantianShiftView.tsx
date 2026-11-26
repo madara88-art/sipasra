@@ -20,11 +20,33 @@ import { useApp } from '../../context/AppContext';
 import { CatatanPergantianShift, ShiftPiketType } from '../../types';
 
 const SHIFT_OPTIONS: ShiftPiketType[] = [
-  'Pagi (05:00 - 13:00)',
-  'Sore (13:00 - 21:00)',
-  'Malam (21:00 - 05:00)',
+  'Pagi (07:00 - 15:00)',
+  'Sore (15:00 - 23:00)',
+  'Malam (23:00 - 07:00)',
   'Pendamping Penuh',
 ];
+
+const SHIFT_HANDOVER_DEFAULTS: Record<
+  ShiftPiketType,
+  { keShift: ShiftPiketType; waktuSerahTerima: string }
+> = {
+  'Pagi (07:00 - 15:00)': {
+    keShift: 'Sore (15:00 - 23:00)',
+    waktuSerahTerima: '15:00',
+  },
+  'Sore (15:00 - 23:00)': {
+    keShift: 'Malam (23:00 - 07:00)',
+    waktuSerahTerima: '23:00',
+  },
+  'Malam (23:00 - 07:00)': {
+    keShift: 'Pagi (07:00 - 15:00)',
+    waktuSerahTerima: '07:00',
+  },
+  'Pendamping Penuh': {
+    keShift: 'Pagi (07:00 - 15:00)',
+    waktuSerahTerima: '07:00',
+  },
+};
 
 const formatDateIndo = (dateStr: string) => {
   if (!dateStr) return '-';
@@ -77,9 +99,9 @@ export const PergantianShiftView: React.FC = () => {
 
   const getInitialForm = (tanggalOverride?: string): Omit<CatatanPergantianShift, 'id'> => ({
     tanggal: tanggalOverride || selectedDate || todayStr,
-    waktuSerahTerima: '13:00',
-    dariShift: 'Pagi (05:00 - 13:00)',
-    keShift: 'Sore (13:00 - 21:00)',
+    waktuSerahTerima: '15:00',
+    dariShift: 'Pagi (07:00 - 15:00)',
+    keShift: 'Sore (15:00 - 23:00)',
     waliMenyerahkan: waliAsuhList[0]?.nama || currentUser?.displayName || '',
     waliMenerima: waliAsuhList[1]?.nama || '',
     jumlahSantriHadir: defaultHadirCount,
@@ -291,7 +313,7 @@ export const PergantianShiftView: React.FC = () => {
             Catatan Pergantian Shift (Per Tanggal)
           </h1>
           <p className="text-xs text-[#1a1c1a]/70 font-mono-custom mt-1">
-            Log serah terima tugas piket pagi, sore, dan malam antar wali asuh asrama Sekolah Rakyat 1 Jepara
+            Log serah terima tugas piket Pagi (07.00 - 15.00), Sore (15.00 - 23.00), dan Malam (23.00 - 07.00) antar wali asuh asrama Sekolah Rakyat 1 Jepara
           </p>
         </div>
 
@@ -494,6 +516,47 @@ export const PergantianShiftView: React.FC = () => {
             )}
 
             <form onSubmit={handleSave} className="space-y-4 font-mono-custom text-xs">
+              {/* Pilihan Cepat Jadwal Serah Terima Shift */}
+              <div className="p-2.5 bg-emerald-50/60 border border-[#006b54]/40 flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-bold uppercase text-[#006b54]">
+                  Jadwal Serah Terima:
+                </span>
+                {(
+                  [
+                    'Pagi (07:00 - 15:00)',
+                    'Sore (15:00 - 23:00)',
+                    'Malam (23:00 - 07:00)',
+                  ] as ShiftPiketType[]
+                ).map((shiftItem) => {
+                  const preset = SHIFT_HANDOVER_DEFAULTS[shiftItem];
+                  const isActive =
+                    formData.dariShift === shiftItem &&
+                    formData.keShift === preset.keShift &&
+                    formData.waktuSerahTerima === preset.waktuSerahTerima;
+                  return (
+                    <button
+                      key={shiftItem}
+                      type="button"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          dariShift: shiftItem,
+                          keShift: preset.keShift,
+                          waktuSerahTerima: preset.waktuSerahTerima,
+                        })
+                      }
+                      className={`px-2.5 py-1 text-[10px] font-bold border border-[#1a1c1a] cursor-pointer transition-colors ${
+                        isActive
+                          ? 'bg-[#006b54] text-white'
+                          : 'bg-white text-[#1a1c1a] hover:bg-[#1a1c1a]/5'
+                      }`}
+                    >
+                      {shiftLabelShort(shiftItem)} → {shiftLabelShort(preset.keShift)} ({preset.waktuSerahTerima})
+                    </button>
+                  );
+                })}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="block font-bold text-[#1a1c1a] mb-1">TANGGAL *</label>
@@ -521,12 +584,17 @@ export const PergantianShiftView: React.FC = () => {
                   <label className="block font-bold text-[#1a1c1a] mb-1">DARI SHIFT *</label>
                   <select
                     value={formData.dariShift}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const nextDari = e.target.value as ShiftPiketType;
+                      const suggested = SHIFT_HANDOVER_DEFAULTS[nextDari];
                       setFormData({
                         ...formData,
-                        dariShift: e.target.value as ShiftPiketType,
-                      })
-                    }
+                        dariShift: nextDari,
+                        keShift: suggested?.keShift || formData.keShift,
+                        waktuSerahTerima:
+                          suggested?.waktuSerahTerima || formData.waktuSerahTerima,
+                      });
+                    }}
                     className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
                   >
                     {SHIFT_OPTIONS.map((opt) => (
@@ -834,9 +902,9 @@ export const PergantianShiftView: React.FC = () => {
                           {item.waktuSerahTerima} WIB
                         </span>
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-[#006b54] text-[#006b54] text-xs font-bold">
-                          <span>{shiftLabelShort(item.dariShift)}</span>
+                          <span>{item.dariShift}</span>
                           <ArrowLeftRight className="w-3 h-3" />
-                          <span>{shiftLabelShort(item.keShift)}</span>
+                          <span>{item.keShift}</span>
                         </span>
                       </div>
 

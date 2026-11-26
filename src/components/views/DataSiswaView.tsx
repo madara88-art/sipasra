@@ -37,8 +37,133 @@ import {
   exportSiswaToCsv,
   generateSiswaTemplateExcel,
   parseSiswaExcel,
+  parseFlexibleDate,
   ParseResult,
 } from '../../utils/excelUtils';
+
+const isoToDmyDisplay = (isoStr?: string): string => {
+  if (!isoStr) return '';
+  const m = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  const parsed = parseFlexibleDate(isoStr);
+  if (parsed) {
+    const p = parsed.split('-');
+    return `${p[2]}-${p[1]}-${p[0]}`;
+  }
+  return isoStr;
+};
+
+interface TanggalLahirInputProps {
+  value: string;
+  onChange: (isoDate: string) => void;
+  inputClassName?: string;
+}
+
+const TanggalLahirInput: React.FC<TanggalLahirInputProps> = ({
+  value,
+  onChange,
+  inputClassName = 'w-full pl-3 pr-9 py-1.5 border border-[#1a1c1a] bg-white text-xs focus:outline-none focus:border-[#006b54]',
+}) => {
+  const [text, setText] = useState<string>(() => isoToDmyDisplay(value));
+  const isFocusedRef = useRef(false);
+  const nativePickerRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isFocusedRef.current) {
+      setText(isoToDmyDisplay(value));
+    }
+  }, [value]);
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const nextText = e.target.value;
+    setText(nextText);
+
+    const trimmed = nextText.trim();
+    if (!trimmed) {
+      onChange('');
+      return;
+    }
+
+    const hasFourDigitYear = /\d{4}/.test(trimmed) || /^\d{8}$/.test(trimmed);
+    if (hasFourDigitYear) {
+      const parsedIso = parseFlexibleDate(trimmed);
+      if (parsedIso) {
+        onChange(parsedIso);
+      }
+    }
+  };
+
+  const handleBlur = () => {
+    isFocusedRef.current = false;
+    const trimmed = text.trim();
+    if (!trimmed) {
+      onChange('');
+      setText('');
+      return;
+    }
+    const parsedIso = parseFlexibleDate(trimmed);
+    if (parsedIso) {
+      onChange(parsedIso);
+      setText(isoToDmyDisplay(parsedIso));
+    }
+  };
+
+  const handleOpenPicker = () => {
+    const picker = nativePickerRef.current;
+    if (!picker) return;
+    if (
+      typeof (picker as HTMLInputElement & { showPicker?: () => void }).showPicker ===
+      'function'
+    ) {
+      try {
+        (picker as HTMLInputElement & { showPicker?: () => void }).showPicker!();
+        return;
+      } catch {
+        // fallback to click
+      }
+    }
+    picker.click();
+  };
+
+  return (
+    <div className="relative flex items-center">
+      <input
+        type="text"
+        inputMode="numeric"
+        placeholder="DD-MM-YYYY (cth: 15-08-2016)"
+        value={text}
+        onFocus={() => {
+          isFocusedRef.current = true;
+        }}
+        onChange={handleTextChange}
+        onBlur={handleBlur}
+        className={inputClassName}
+      />
+      <button
+        type="button"
+        onClick={handleOpenPicker}
+        title="Pilih dari kalender"
+        aria-label="Pilih tanggal lahir dari kalender"
+        className="absolute right-1.5 p-1 text-[#1a1c1a]/65 hover:text-[#006b54] cursor-pointer"
+      >
+        <Calendar className="w-3.5 h-3.5" />
+      </button>
+      <input
+        ref={nativePickerRef}
+        type="date"
+        tabIndex={-1}
+        aria-hidden="true"
+        value={/^\d{4}-\d{2}-\d{2}$/.test(value) ? value : parseFlexibleDate(value) || ''}
+        onChange={(e) => {
+          const picked = e.target.value;
+          onChange(picked);
+          setText(isoToDmyDisplay(picked));
+        }}
+        className="sr-only"
+      />
+    </div>
+  );
+};
 
 export const DataSiswaView: React.FC = () => {
   const {
@@ -202,6 +327,10 @@ export const DataSiswaView: React.FC = () => {
   // Form State
   const initialFormState: Omit<Siswa, 'id'> = {
     nisn: '',
+    nik: '',
+    noKk: '',
+    tempatLahir: '',
+    tanggalLahir: '',
     nama: '',
     panggilan: '',
     jenisKelamin: 'L',
@@ -213,6 +342,9 @@ export const DataSiswaView: React.FC = () => {
       namaIbu: '',
       noHp: '',
       alamat: '',
+      desa: '',
+      kecamatan: '',
+      kabupaten: '',
       kotaAsal: 'Jepara',
     },
     tanggalMasuk: new Date().toISOString().split('T')[0],
@@ -228,16 +360,43 @@ export const DataSiswaView: React.FC = () => {
 
   const [formData, setFormData] = useState<Omit<Siswa, 'id'>>(initialFormState);
 
+  const formatTanggalIndonesia = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const iso = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : parseFlexibleDate(dateStr);
+    const parsed = iso ? new Date(`${iso}T00:00:00`) : new Date(dateStr);
+    if (isNaN(parsed.getTime())) return dateStr;
+    return parsed.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  };
+
+  const formatTTL = (siswa: Siswa) => {
+    const tempat = siswa.tempatLahir?.trim();
+    const tgl = formatTanggalIndonesia(siswa.tanggalLahir);
+    if (tempat && tgl) return `${tempat}, ${tgl}`;
+    return tempat || tgl || '-';
+  };
+
   // Filter logic
   const activeSearch = globalSearch || localSearch;
   const filteredSiswa = siswaList.filter((s) => {
+    const q = activeSearch.toLowerCase();
     const matchSearch =
-      s.nama.toLowerCase().includes(activeSearch.toLowerCase()) ||
-      s.panggilan.toLowerCase().includes(activeSearch.toLowerCase()) ||
+      s.nama.toLowerCase().includes(q) ||
+      s.panggilan.toLowerCase().includes(q) ||
       s.nisn.includes(activeSearch) ||
+      (s.nik && s.nik.includes(activeSearch)) ||
+      (s.noKk && s.noKk.includes(activeSearch)) ||
+      (s.tempatLahir && s.tempatLahir.toLowerCase().includes(q)) ||
+      (s.orangTua.alamat && s.orangTua.alamat.toLowerCase().includes(q)) ||
+      (s.orangTua.desa && s.orangTua.desa.toLowerCase().includes(q)) ||
+      (s.orangTua.kecamatan && s.orangTua.kecamatan.toLowerCase().includes(q)) ||
+      (s.orangTua.kabupaten && s.orangTua.kabupaten.toLowerCase().includes(q)) ||
       (s.dokumen?.ktpNomor && s.dokumen.ktpNomor.includes(activeSearch)) ||
       (s.dokumen?.kkNomor && s.dokumen.kkNomor.includes(activeSearch)) ||
-      (s.dokumen?.akteNomor && s.dokumen.akteNomor.toLowerCase().includes(activeSearch.toLowerCase()));
+      (s.dokumen?.akteNomor && s.dokumen.akteNomor.toLowerCase().includes(q));
 
     const matchKelas = selectedKelas === 'Semua' || s.kelas === selectedKelas;
     const matchKamar =
@@ -252,7 +411,7 @@ export const DataSiswaView: React.FC = () => {
     // Filter dokumen
     const hasFoto = Boolean(s.dokumen?.foto);
     const hasKtp = Boolean(s.dokumen?.ktp || s.dokumen?.ktpNomor);
-    const hasKk = Boolean(s.dokumen?.kk || s.dokumen?.kkNomor);
+    const hasKk = Boolean(s.dokumen?.kk || s.dokumen?.kkNomor || s.noKk);
     const hasAkte = Boolean(s.dokumen?.akte || s.dokumen?.akteNomor);
     const docCount = [hasFoto, hasKtp, hasKk, hasAkte].filter(Boolean).length;
 
@@ -283,20 +442,32 @@ export const DataSiswaView: React.FC = () => {
   const populateEditFormFromSiswa = (siswa: Siswa) => {
     setEditTargetId(siswa.id);
     setEditFormError(null);
+    const syncedKk = siswa.noKk || siswa.dokumen?.kkNomor || '';
     setFormData({
       nisn: siswa.nisn,
+      nik: siswa.nik || '',
+      noKk: syncedKk,
+      tempatLahir: siswa.tempatLahir || '',
+      tanggalLahir: siswa.tanggalLahir || '',
       nama: siswa.nama,
       panggilan: siswa.panggilan,
       jenisKelamin: siswa.jenisKelamin,
       kelas: siswa.kelas,
       kamarId: siswa.kamarId,
       waliAsuhId: siswa.waliAsuhId,
-      orangTua: { ...siswa.orangTua },
+      orangTua: {
+        ...siswa.orangTua,
+        desa: siswa.orangTua.desa || '',
+        kecamatan: siswa.orangTua.kecamatan || '',
+        kabupaten: siswa.orangTua.kabupaten || '',
+      },
       tanggalMasuk: siswa.tanggalMasuk,
       alergi: siswa.alergi || '',
       catatanKhusus: siswa.catatanKhusus || '',
       status: siswa.status,
-      dokumen: siswa.dokumen ? { ...siswa.dokumen } : { ktpNomor: '', kkNomor: '', akteNomor: '' },
+      dokumen: siswa.dokumen
+        ? { ...siswa.dokumen, kkNomor: syncedKk }
+        : { ktpNomor: '', kkNomor: syncedKk, akteNomor: '' },
     });
   };
 
@@ -396,9 +567,12 @@ export const DataSiswaView: React.FC = () => {
   };
 
   const handleSaveDokumen = (siswaId: string, updatedDokumen: DokumenSiswa) => {
-    updateSiswa(siswaId, { dokumen: updatedDokumen });
+    const syncedNoKk = updatedDokumen.kkNomor?.trim() || undefined;
+    updateSiswa(siswaId, { dokumen: updatedDokumen, noKk: syncedNoKk });
     if (selectedSiswa && selectedSiswa.id === siswaId) {
-      setSelectedSiswa((prev) => (prev ? { ...prev, dokumen: updatedDokumen } : null));
+      setSelectedSiswa((prev) =>
+        prev ? { ...prev, dokumen: updatedDokumen, noKk: syncedNoKk } : null
+      );
     }
   };
 
@@ -431,20 +605,49 @@ export const DataSiswaView: React.FC = () => {
 
   const handleSaveAdd = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedNama = formData.nama.trim();
-    if (!trimmedNama) {
-      setAddFormError('Nama lengkap santri wajib diisi.');
-      return;
-    }
     setAddFormError(null);
-    const trimmedNisn = formData.nisn.trim() || String(Date.now()).slice(-10);
-    const panggilan = formData.panggilan.trim() || trimmedNama.split(' ')[0];
+    const rawNama = formData.nama.trim();
+    const rawPanggilan = formData.panggilan.trim();
+    const rawNisn = formData.nisn.trim();
+    const trimmedNisn = rawNisn || String(Date.now()).slice(-10);
+    const trimmedNama =
+      rawNama ||
+      rawPanggilan ||
+      (rawNisn ? `Santri (${rawNisn})` : `Santri Baru #${siswaList.length + 1}`);
+    const panggilan = rawPanggilan || trimmedNama.split(' ')[0];
+    const trimmedNik = (formData.nik || '').trim() || undefined;
+    const trimmedNoKk =
+      (formData.noKk || formData.dokumen?.kkNomor || '').trim() || undefined;
+    const trimmedTempatLahir = (formData.tempatLahir || '').trim() || undefined;
+    const trimmedTanggalLahir = (formData.tanggalLahir || '').trim() || undefined;
+    const tanggalMasuk = formData.tanggalMasuk || new Date().toISOString().split('T')[0];
+
+    const trimmedDesa = (formData.orangTua.desa || '').trim() || undefined;
+    const trimmedKecamatan = (formData.orangTua.kecamatan || '').trim() || undefined;
+    const trimmedKabupaten = (formData.orangTua.kabupaten || '').trim() || undefined;
+    const trimmedKotaAsal = formData.orangTua.kotaAsal.trim() || trimmedKabupaten || '';
 
     addSiswa({
       ...formData,
       nama: trimmedNama,
       nisn: trimmedNisn,
+      nik: trimmedNik,
+      noKk: trimmedNoKk,
+      tempatLahir: trimmedTempatLahir,
+      tanggalLahir: trimmedTanggalLahir,
+      tanggalMasuk,
       panggilan,
+      orangTua: {
+        ...formData.orangTua,
+        desa: trimmedDesa,
+        kecamatan: trimmedKecamatan,
+        kabupaten: trimmedKabupaten,
+        kotaAsal: trimmedKotaAsal,
+      },
+      dokumen: {
+        ...formData.dokumen,
+        kkNomor: trimmedNoKk,
+      },
     });
 
     // Reset filter so newly added student is immediately visible
@@ -454,7 +657,20 @@ export const DataSiswaView: React.FC = () => {
     setSelectedDokumenFilter('Semua');
     setLocalSearch('');
 
-    showToast(`✓ Santri ${trimmedNama} berhasil ditambahkan.`);
+    const hasMissingData =
+      !rawNama ||
+      !rawNisn ||
+      !trimmedNik ||
+      !trimmedNoKk ||
+      !trimmedTempatLahir ||
+      !trimmedTanggalLahir ||
+      !formData.orangTua.noHp.trim();
+
+    showToast(
+      hasMissingData
+        ? `✓ Santri ${trimmedNama} disimpan (data yang kurang bisa dilengkapi nanti via Edit).`
+        : `✓ Santri ${trimmedNama} berhasil ditambahkan.`
+    );
     setActivePanel('none');
     setFormData(initialFormState);
   };
@@ -466,17 +682,46 @@ export const DataSiswaView: React.FC = () => {
       setEditFormError('Pilih santri yang akan diperbarui terlebih dahulu.');
       return;
     }
-    const trimmedNama = formData.nama.trim();
-    if (!trimmedNama) {
-      setEditFormError('Nama lengkap santri wajib diisi.');
-      return;
-    }
     setEditFormError(null);
+    const rawNama = formData.nama.trim();
+    const rawPanggilan = formData.panggilan.trim();
+    const trimmedNisn = formData.nisn.trim() || '-';
+    const trimmedNama =
+      rawNama ||
+      rawPanggilan ||
+      target.nama ||
+      `Santri (${trimmedNisn})`;
+    const trimmedNik = (formData.nik || '').trim() || undefined;
+    const trimmedNoKk =
+      (formData.noKk || formData.dokumen?.kkNomor || '').trim() || undefined;
+    const trimmedTempatLahir = (formData.tempatLahir || '').trim() || undefined;
+    const trimmedTanggalLahir = (formData.tanggalLahir || '').trim() || undefined;
+
+    const trimmedDesa = (formData.orangTua.desa || '').trim() || undefined;
+    const trimmedKecamatan = (formData.orangTua.kecamatan || '').trim() || undefined;
+    const trimmedKabupaten = (formData.orangTua.kabupaten || '').trim() || undefined;
+    const trimmedKotaAsal = formData.orangTua.kotaAsal.trim() || trimmedKabupaten || '';
+
     const updatedPayload: Omit<Siswa, 'id'> = {
       ...formData,
       nama: trimmedNama,
-      nisn: formData.nisn.trim() || target.nisn,
-      panggilan: formData.panggilan.trim() || trimmedNama.split(' ')[0],
+      nisn: trimmedNisn,
+      nik: trimmedNik,
+      noKk: trimmedNoKk,
+      tempatLahir: trimmedTempatLahir,
+      tanggalLahir: trimmedTanggalLahir,
+      panggilan: rawPanggilan || trimmedNama.split(' ')[0],
+      orangTua: {
+        ...formData.orangTua,
+        desa: trimmedDesa,
+        kecamatan: trimmedKecamatan,
+        kabupaten: trimmedKabupaten,
+        kotaAsal: trimmedKotaAsal,
+      },
+      dokumen: {
+        ...formData.dokumen,
+        kkNomor: trimmedNoKk,
+      },
     };
     updateSiswa(target.id, updatedPayload);
     if (selectedSiswa?.id === target.id) {
@@ -603,7 +848,7 @@ export const DataSiswaView: React.FC = () => {
       keKamarId: mutasiForm.keKamarId || undefined,
       keWaliAsuhId: mutasiForm.keWaliAsuhId || undefined,
       keKelas: mutasiForm.keKelas,
-      tanggal: mutasiForm.tanggal,
+      tanggal: mutasiForm.tanggal || new Date().toISOString().split('T')[0],
       keterangan: mutasiForm.keterangan,
     });
 
@@ -912,7 +1157,7 @@ export const DataSiswaView: React.FC = () => {
                   Form Tambah Siswa Baru
                 </h2>
                 <p className="text-xs font-mono-custom text-[#1a1c1a]/65 mt-0.5">
-                  Lengkapi biodata santri baru, penempatan kamar asrama, dan kontak orang tua.
+                  Isi data yang tersedia — tetap dapat disimpan meski belum lengkap dan bisa dilengkapi nanti.
                 </p>
               </div>
               <button
@@ -996,12 +1241,11 @@ export const DataSiswaView: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2">
                   <label className="block font-bold text-[#1a1c1a] mb-1">
-                    Nama Lengkap Santri *
+                    Nama Lengkap Santri
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="Contoh: Ahmad Fauzan Pratama"
+                    placeholder="Contoh: Ahmad Fauzan Pratama (boleh dikosongkan sementara)"
                     value={formData.nama}
                     onChange={(e) => {
                       setFormData({ ...formData, nama: e.target.value });
@@ -1081,6 +1325,75 @@ export const DataSiswaView: React.FC = () => {
                 </div>
               </div>
 
+              {/* Identitas Kependudukan & Tempat/Tanggal Lahir */}
+              <div className="p-3 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] space-y-2.5">
+                <span className="font-bold text-[#1a1c1a] block">
+                  Identitas Kependudukan & Kelahiran (No. KK, NIK, Tempat & Tanggal Lahir)
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[#1a1c1a] mb-1 font-bold">
+                      No. KK (Kartu Keluarga)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={16}
+                      placeholder="16 digit No. KK"
+                      value={formData.noKk || formData.dokumen?.kkNomor || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormData({
+                          ...formData,
+                          noKk: val,
+                          dokumen: { ...formData.dokumen, kkNomor: val },
+                        });
+                      }}
+                      className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs focus:outline-none focus:border-[#006b54]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[#1a1c1a] mb-1 font-bold">
+                      NIK (Nomor Induk Kependudukan)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={16}
+                      placeholder="16 digit NIK Santri"
+                      value={formData.nik || ''}
+                      onChange={(e) => setFormData({ ...formData, nik: e.target.value })}
+                      className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs focus:outline-none focus:border-[#006b54]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[#1a1c1a] mb-1 font-bold">
+                      Tempat Lahir
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Contoh: Jepara"
+                      value={formData.tempatLahir || ''}
+                      onChange={(e) =>
+                        setFormData({ ...formData, tempatLahir: e.target.value })
+                      }
+                      className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans focus:outline-none focus:border-[#006b54]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[#1a1c1a] mb-1 font-bold">
+                      Tanggal Lahir (Tgl-Bln-Thn)
+                    </label>
+                    <TanggalLahirInput
+                      value={formData.tanggalLahir || ''}
+                      onChange={(iso) =>
+                        setFormData({ ...formData, tanggalLahir: iso })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold text-[#1a1c1a] mb-1">Kamar Asrama</label>
@@ -1097,6 +1410,7 @@ export const DataSiswaView: React.FC = () => {
                     }}
                     className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs focus:outline-none focus:border-[#006b54]"
                   >
+                    <option value="">-- Belum Ditentukan --</option>
                     {kamarList.map((k) => (
                       <option key={k.id} value={k.id}>
                         {k.nama} ({k.gedung})
@@ -1111,6 +1425,7 @@ export const DataSiswaView: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, waliAsuhId: e.target.value })}
                     className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs focus:outline-none focus:border-[#006b54]"
                   >
+                    <option value="">-- Belum Ditentukan --</option>
                     {waliAsuhList.map((w) => (
                       <option key={w.id} value={w.id}>
                         {w.nama}
@@ -1119,12 +1434,11 @@ export const DataSiswaView: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block font-bold text-[#1a1c1a] mb-1">Tanggal Masuk</label>
-                  <input
-                    type="date"
+                  <label className="block font-bold text-[#1a1c1a] mb-1">Tanggal Masuk (Tgl-Bln-Thn)</label>
+                  <TanggalLahirInput
                     value={formData.tanggalMasuk}
-                    onChange={(e) => setFormData({ ...formData, tanggalMasuk: e.target.value })}
-                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs focus:outline-none focus:border-[#006b54]"
+                    onChange={(iso) => setFormData({ ...formData, tanggalMasuk: iso })}
+                    inputClassName="w-full pl-3 pr-9 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs focus:outline-none focus:border-[#006b54]"
                   />
                 </div>
               </div>
@@ -1193,20 +1507,74 @@ export const DataSiswaView: React.FC = () => {
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-[#1a1c1a] mb-1">Alamat Lengkap</label>
-                  <input
-                    type="text"
-                    placeholder="Desa, RT/RW, Kecamatan, Kabupaten"
-                    value={formData.orangTua.alamat}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        orangTua: { ...formData.orangTua, alamat: e.target.value },
-                      })
-                    }
-                    className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
-                  />
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-[#1a1c1a] mb-1">Alamat Lengkap (Jalan / Dusun / RT-RW)</label>
+                    <input
+                      type="text"
+                      placeholder="Contoh: Jl. Sunan Mantingan RT 03/RW 02"
+                      value={formData.orangTua.alamat}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          orangTua: { ...formData.orangTua, alamat: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="block text-[#1a1c1a] mb-1 font-bold">Desa / Kelurahan</label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Desa Tahunan"
+                        value={formData.orangTua.desa || ''}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            orangTua: { ...formData.orangTua, desa: e.target.value },
+                          })
+                        }
+                        className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[#1a1c1a] mb-1 font-bold">Kecamatan</label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Kec. Tahunan"
+                        value={formData.orangTua.kecamatan || ''}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            orangTua: { ...formData.orangTua, kecamatan: e.target.value },
+                          })
+                        }
+                        className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[#1a1c1a] mb-1 font-bold">Kabupaten / Kota</label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Kab. Jepara"
+                        value={formData.orangTua.kabupaten || ''}
+                        onChange={(e) => {
+                          const nextKab = e.target.value;
+                          setFormData({
+                            ...formData,
+                            orangTua: {
+                              ...formData.orangTua,
+                              kabupaten: nextKab,
+                              kotaAsal: nextKab || formData.orangTua.kotaAsal,
+                            },
+                          });
+                        }}
+                        className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1391,11 +1759,10 @@ export const DataSiswaView: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-[#1a1c1a] mb-1">
-                      Nama Lengkap Santri *
+                      Nama Lengkap Santri
                     </label>
                     <input
                       type="text"
-                      required
                       value={formData.nama}
                       onChange={(e) => {
                         setFormData({ ...formData, nama: e.target.value });
@@ -1417,10 +1784,9 @@ export const DataSiswaView: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div>
-                    <label className="block font-bold text-[#1a1c1a] mb-1">NISN *</label>
+                    <label className="block font-bold text-[#1a1c1a] mb-1">NISN</label>
                     <input
                       type="text"
-                      required
                       value={formData.nisn}
                       onChange={(e) => setFormData({ ...formData, nisn: e.target.value })}
                       className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs focus:outline-none focus:border-[#006b54]"
@@ -1489,6 +1855,7 @@ export const DataSiswaView: React.FC = () => {
                       }}
                       className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs focus:outline-none focus:border-[#006b54]"
                     >
+                      <option value="">-- Belum Ditentukan --</option>
                       {kamarList.map((k) => (
                         <option key={k.id} value={k.id}>
                           {k.nama} ({k.gedung})
@@ -1503,6 +1870,7 @@ export const DataSiswaView: React.FC = () => {
                       onChange={(e) => setFormData({ ...formData, waliAsuhId: e.target.value })}
                       className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs focus:outline-none focus:border-[#006b54]"
                     >
+                      <option value="">-- Belum Ditentukan --</option>
                       {waliAsuhList.map((w) => (
                         <option key={w.id} value={w.id}>
                           {w.nama}
@@ -1511,47 +1879,89 @@ export const DataSiswaView: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="block font-bold text-[#1a1c1a] mb-1">Tanggal Masuk</label>
-                    <input
-                      type="date"
+                    <label className="block font-bold text-[#1a1c1a] mb-1">Tanggal Masuk (Tgl-Bln-Thn)</label>
+                    <TanggalLahirInput
                       value={formData.tanggalMasuk}
-                      onChange={(e) => setFormData({ ...formData, tanggalMasuk: e.target.value })}
-                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs focus:outline-none focus:border-[#006b54]"
+                      onChange={(iso) => setFormData({ ...formData, tanggalMasuk: iso })}
+                      inputClassName="w-full pl-3 pr-9 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-xs focus:outline-none focus:border-[#006b54]"
                     />
                   </div>
                 </div>
 
-                {/* Nomor Identitas Legal */}
+                {/* Nomor Identitas Legal & TTL */}
                 <div className="p-3 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] space-y-2.5">
-                  <span className="font-bold text-[#1a1c1a] block">Nomor Identitas Legal (KTP, KK, Akta)</span>
+                  <span className="font-bold text-[#1a1c1a] block">
+                    Identitas Kependudukan & Kelahiran (NIK, No. KK, TTL, Akta)
+                  </span>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[#1a1c1a] mb-1">NIK KTP Orang Tua</label>
+                      <label className="block text-[#1a1c1a] mb-1">NIK Santri</label>
                       <input
                         type="text"
+                        inputMode="numeric"
                         maxLength={16}
-                        placeholder="16 digit NIK"
-                        value={formData.dokumen?.ktpNomor || ''}
+                        placeholder="16 digit NIK Santri"
+                        value={formData.nik || ''}
                         onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            dokumen: { ...formData.dokumen, ktpNomor: e.target.value },
-                          })
+                          setFormData({ ...formData, nik: e.target.value })
                         }
                         className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs"
                       />
                     </div>
                     <div>
+                      <label className="block text-[#1a1c1a] mb-1">Tempat Lahir</label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Jepara"
+                        value={formData.tempatLahir || ''}
+                        onChange={(e) =>
+                          setFormData({ ...formData, tempatLahir: e.target.value })
+                        }
+                        className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[#1a1c1a] mb-1">Tanggal Lahir (Tgl-Bln-Thn)</label>
+                      <TanggalLahirInput
+                        value={formData.tanggalLahir || ''}
+                        onChange={(iso) =>
+                          setFormData({ ...formData, tanggalLahir: iso })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
                       <label className="block text-[#1a1c1a] mb-1">Nomor Kartu Keluarga (KK)</label>
                       <input
                         type="text"
+                        inputMode="numeric"
                         maxLength={16}
                         placeholder="16 digit No. KK"
-                        value={formData.dokumen?.kkNomor || ''}
+                        value={formData.noKk || formData.dokumen?.kkNomor || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setFormData({
+                            ...formData,
+                            noKk: val,
+                            dokumen: { ...formData.dokumen, kkNomor: val },
+                          });
+                        }}
+                        className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[#1a1c1a] mb-1">NIK KTP Orang Tua</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={16}
+                        placeholder="16 digit NIK Orang Tua"
+                        value={formData.dokumen?.ktpNomor || ''}
                         onChange={(e) =>
                           setFormData({
                             ...formData,
-                            dokumen: { ...formData.dokumen, kkNomor: e.target.value },
+                            dokumen: { ...formData.dokumen, ktpNomor: e.target.value },
                           })
                         }
                         className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs"
@@ -1636,20 +2046,74 @@ export const DataSiswaView: React.FC = () => {
                       />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-[#1a1c1a] mb-1">Alamat Lengkap</label>
-                    <input
-                      type="text"
-                      placeholder="Desa, RT/RW, Kecamatan, Kabupaten"
-                      value={formData.orangTua.alamat}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          orangTua: { ...formData.orangTua, alamat: e.target.value },
-                        })
-                      }
-                      className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
-                    />
+                  <div className="space-y-2.5">
+                    <div>
+                      <label className="block text-[#1a1c1a] mb-1">Alamat Lengkap (Jalan / Dusun / RT-RW)</label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Jl. Sunan Mantingan RT 03/RW 02"
+                        value={formData.orangTua.alamat}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            orangTua: { ...formData.orangTua, alamat: e.target.value },
+                          })
+                        }
+                        className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block text-[#1a1c1a] mb-1 font-bold">Desa / Kelurahan</label>
+                        <input
+                          type="text"
+                          placeholder="Contoh: Desa Tahunan"
+                          value={formData.orangTua.desa || ''}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              orangTua: { ...formData.orangTua, desa: e.target.value },
+                            })
+                          }
+                          className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[#1a1c1a] mb-1 font-bold">Kecamatan</label>
+                        <input
+                          type="text"
+                          placeholder="Contoh: Kec. Tahunan"
+                          value={formData.orangTua.kecamatan || ''}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              orangTua: { ...formData.orangTua, kecamatan: e.target.value },
+                            })
+                          }
+                          className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[#1a1c1a] mb-1 font-bold">Kabupaten / Kota</label>
+                        <input
+                          type="text"
+                          placeholder="Contoh: Kab. Jepara"
+                          value={formData.orangTua.kabupaten || ''}
+                          onChange={(e) => {
+                            const nextKab = e.target.value;
+                            setFormData({
+                              ...formData,
+                              orangTua: {
+                                ...formData.orangTua,
+                                kabupaten: nextKab,
+                                kotaAsal: nextKab || formData.orangTua.kotaAsal,
+                              },
+                            });
+                          }}
+                          className="w-full px-3 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1894,7 +2358,6 @@ export const DataSiswaView: React.FC = () => {
                         Pindah ke Kamar Tujuan *
                       </label>
                       <select
-                        required
                         value={mutasiForm.keKamarId}
                         onChange={(e) => {
                           const kamarId = e.target.value;
@@ -1907,6 +2370,7 @@ export const DataSiswaView: React.FC = () => {
                         }}
                         className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs"
                       >
+                        <option value="">-- Belum Ditentukan --</option>
                         {kamarList.map((k) => (
                           <option key={k.id} value={k.id}>
                             {k.nama} ({k.gedung})
@@ -1925,6 +2389,7 @@ export const DataSiswaView: React.FC = () => {
                         }
                         className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white text-xs"
                       >
+                        <option value="">-- Belum Ditentukan --</option>
                         {waliAsuhList.map((w) => (
                           <option key={w.id} value={w.id}>
                             {w.nama}
@@ -1940,10 +2405,9 @@ export const DataSiswaView: React.FC = () => {
                   mutasiForm.jenisMutasi === 'Pindah Kamar & Kelas') && (
                   <div className="p-3.5 bg-emerald-50/50 border border-[#006b54]/50">
                     <label className="block font-bold text-[#1a1c1a] mb-1">
-                      Pindah ke Kelas Tujuan *
+                      Pindah ke Kelas Tujuan
                     </label>
                     <select
-                      required
                       value={mutasiForm.keKelas}
                       onChange={(e) =>
                         setMutasiForm((prev) => ({
@@ -1972,11 +2436,10 @@ export const DataSiswaView: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block font-bold text-[#1a1c1a] mb-1">
-                      Tanggal Mutasi *
+                      Tanggal Mutasi
                     </label>
                     <input
                       type="date"
-                      required
                       value={mutasiForm.tanggal}
                       onChange={(e) =>
                         setMutasiForm((prev) => ({ ...prev, tanggal: e.target.value }))
@@ -2316,7 +2779,7 @@ export const DataSiswaView: React.FC = () => {
                   Form Import Berkas Data Siswa
                 </h2>
                 <p className="text-xs font-mono-custom text-[#1a1c1a]/65 mt-0.5">
-                  Unggah berkas spreadsheet (.xlsx, .xls, atau .csv) untuk menambahkan atau memperbarui data santri secara massal.
+                  Unggah berkas (.xlsx, .xls, .csv, atau .txt) — cukup berisi Nama Siswa saja sudah bisa langsung diimpor dan disimpan.
                 </p>
               </div>
               <button
@@ -2335,10 +2798,10 @@ export const DataSiswaView: React.FC = () => {
                 <div>
                   <div className="font-bold text-[#006b54] text-xs uppercase flex items-center gap-1.5">
                     <FileSpreadsheet className="w-4 h-4" />
-                    <span>Format Excel Resmi & Terstandar</span>
+                    <span>Cukup Nama Siswa — Kolom Lain Opsional</span>
                   </div>
                   <p className="text-[11px] text-[#1a1c1a]/70 mt-0.5">
-                    Unduh template berkas untuk panduan kolom (NISN, Nama, Kelas, Kamar, Wali Asuh, Kontak Orang Tua).
+                    Anda boleh mengunggah daftar nama siswa saja (dengan atau tanpa header), atau gunakan template Excel lengkap.
                   </p>
                 </div>
                 <button
@@ -2355,7 +2818,7 @@ export const DataSiswaView: React.FC = () => {
               <input
                 ref={importFileInputRef}
                 type="file"
-                accept=".xlsx, .xls, .csv"
+                accept=".xlsx, .xls, .csv, .txt"
                 onChange={(e) => {
                   if (e.target.files && e.target.files[0]) {
                     handleImportFileChange(e.target.files[0]);
@@ -2375,10 +2838,10 @@ export const DataSiswaView: React.FC = () => {
                     <Upload className="w-6 h-6" />
                   </div>
                   <p className="font-syne font-bold text-sm text-[#1a1c1a]">
-                    Klik untuk Memilih atau Seret Berkas Excel / CSV ke Sini
+                    Klik untuk Memilih atau Seret Berkas Excel / CSV / TXT ke Sini
                   </p>
                   <p className="text-[11px] text-[#1a1c1a]/60 mt-1 mb-3">
-                    Mendukung format .xlsx, .xls, dan .csv
+                    Mendukung .xlsx, .xls, .csv, dan .txt (cukup kolom Nama Siswa sudah bisa disimpan)
                   </p>
                   <span className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-[#006b54] text-white font-bold text-xs border-[1.5px] border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] uppercase">
                     <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -2813,7 +3276,7 @@ export const DataSiswaView: React.FC = () => {
 
           const hasFoto = Boolean(siswa.dokumen?.foto);
           const hasKtp = Boolean(siswa.dokumen?.ktp || siswa.dokumen?.ktpNomor);
-          const hasKk = Boolean(siswa.dokumen?.kk || siswa.dokumen?.kkNomor);
+          const hasKk = Boolean(siswa.dokumen?.kk || siswa.dokumen?.kkNomor || siswa.noKk);
           const hasAkte = Boolean(siswa.dokumen?.akte || siswa.dokumen?.akteNomor);
           const docsCount = [hasFoto, hasKtp, hasKk, hasAkte].filter(Boolean).length;
 
@@ -2933,7 +3396,11 @@ export const DataSiswaView: React.FC = () => {
                         ? 'bg-emerald-100 text-[#006b54] border-emerald-400'
                         : 'bg-stone-100 text-stone-400 border-stone-200'
                     }`}
-                    title={hasKk ? `KK: ${siswa.dokumen?.kkNomor || 'Berkas Ada'}` : 'KK belum diunggah'}
+                    title={
+                      hasKk
+                        ? `KK: ${siswa.noKk || siswa.dokumen?.kkNomor || 'Berkas Ada'}`
+                        : 'KK belum diunggah'
+                    }
                   >
                     📄 KK
                   </span>
@@ -3168,13 +3635,26 @@ export const DataSiswaView: React.FC = () => {
                   <strong className="font-mono-custom text-[11px]">NISN:</strong> {selectedSiswa.nisn}
                 </div>
                 <div>
+                  <strong className="font-mono-custom text-[11px]">NIK SANTRI:</strong>{' '}
+                  {selectedSiswa.nik || '-'}
+                </div>
+                <div>
+                  <strong className="font-mono-custom text-[11px]">NO. KK:</strong>{' '}
+                  {selectedSiswa.noKk || selectedSiswa.dokumen?.kkNomor || '-'}
+                </div>
+                <div>
+                  <strong className="font-mono-custom text-[11px]">TEMPAT, TGL LAHIR:</strong>{' '}
+                  {formatTTL(selectedSiswa)}
+                </div>
+                <div>
                   <strong className="font-mono-custom text-[11px]">KELAS:</strong> {selectedSiswa.kelas}
                 </div>
                 <div>
                   <strong className="font-mono-custom text-[11px]">KAMAR:</strong> {getKamar(selectedSiswa.kamarId)?.nama || '-'}
                 </div>
                 <div>
-                  <strong className="font-mono-custom text-[11px]">KOTA ASAL:</strong> {selectedSiswa.orangTua.kotaAsal}
+                  <strong className="font-mono-custom text-[11px]">KOTA ASAL:</strong>{' '}
+                  {selectedSiswa.orangTua.kotaAsal || '-'}
                 </div>
                 <div>
                   <strong className="font-mono-custom text-[11px]">STATUS:</strong>{' '}
@@ -3189,16 +3669,30 @@ export const DataSiswaView: React.FC = () => {
                   // GUARDIAN INFO
                 </span>
                 <div>
-                  <strong className="font-mono-custom text-[11px]">WALI ASUH:</strong> {getWaliAsuh(selectedSiswa.waliAsuhId)?.nama || '-'}
+                  <strong className="font-mono-custom text-[11px]">WALI ASUH:</strong>{' '}
+                  {getWaliAsuh(selectedSiswa.waliAsuhId)?.nama || '-'}
                 </div>
                 <div>
-                  <strong className="font-mono-custom text-[11px]">ORANG TUA:</strong> {selectedSiswa.orangTua.namaAyah} & {selectedSiswa.orangTua.namaIbu}
+                  <strong className="font-mono-custom text-[11px]">ORANG TUA:</strong>{' '}
+                  {selectedSiswa.orangTua.namaAyah || '-'} &amp; {selectedSiswa.orangTua.namaIbu || '-'}
                 </div>
                 <div>
-                  <strong className="font-mono-custom text-[11px]">KONTAK WA:</strong> {selectedSiswa.orangTua.noHp}
+                  <strong className="font-mono-custom text-[11px]">KONTAK WA:</strong>{' '}
+                  {selectedSiswa.orangTua.noHp || '-'}
                 </div>
                 <div>
-                  <strong className="font-mono-custom text-[11px]">ALAMAT:</strong> {selectedSiswa.orangTua.alamat}
+                  <strong className="font-mono-custom text-[11px]">ALAMAT:</strong>{' '}
+                  {selectedSiswa.orangTua.alamat || '-'}
+                </div>
+                <div>
+                  <strong className="font-mono-custom text-[11px]">DESA / KEC / KAB:</strong>{' '}
+                  {[
+                    selectedSiswa.orangTua.desa ? `Desa ${selectedSiswa.orangTua.desa}` : '',
+                    selectedSiswa.orangTua.kecamatan ? `Kec. ${selectedSiswa.orangTua.kecamatan}` : '',
+                    selectedSiswa.orangTua.kabupaten ? `Kab. ${selectedSiswa.orangTua.kabupaten}` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(', ') || '-'}
                 </div>
               </div>
             </div>
@@ -3270,16 +3764,22 @@ export const DataSiswaView: React.FC = () => {
                     <span className="text-[10px] font-bold text-[#1a1c1a]">📄 Kartu Keluarga</span>
                     <span
                       className={`text-[8.5px] px-1 py-0.2 font-mono-custom font-bold ${
-                        selectedSiswa.dokumen?.kk || selectedSiswa.dokumen?.kkNomor
+                        selectedSiswa.dokumen?.kk || selectedSiswa.dokumen?.kkNomor || selectedSiswa.noKk
                           ? 'text-emerald-700 bg-emerald-100'
                           : 'text-stone-500 bg-stone-100'
                       }`}
                     >
-                      {selectedSiswa.dokumen?.kk ? 'BERKAS' : selectedSiswa.dokumen?.kkNomor ? 'NOMOR' : 'KOSONG'}
+                      {selectedSiswa.dokumen?.kk
+                        ? 'BERKAS'
+                        : selectedSiswa.dokumen?.kkNomor || selectedSiswa.noKk
+                        ? 'NOMOR'
+                        : 'KOSONG'}
                     </span>
                   </div>
                   <p className="text-[10px] text-[#1a1c1a]/70 font-mono-custom truncate">
-                    {selectedSiswa.dokumen?.kkNomor || (selectedSiswa.dokumen?.kk ? 'Berkas Ada' : 'Belum ada')}
+                    {selectedSiswa.noKk ||
+                      selectedSiswa.dokumen?.kkNomor ||
+                      (selectedSiswa.dokumen?.kk ? 'Berkas Ada' : 'Belum ada')}
                   </p>
                 </div>
 

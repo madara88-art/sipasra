@@ -13,9 +13,34 @@ import {
   UserMinus,
   Crown,
   ExternalLink,
+  Building2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Kamar } from '../../types';
+
+const GEDUNG_NAMES_STORAGE_KEY = 'sipasra_gedung_names_v1';
+
+const extractGedungInfo = (gedungStr: string): { kategori: 'Putra' | 'Putri'; namaGedung: string } => {
+  const lower = (gedungStr || '').toLowerCase();
+  const kategori: 'Putra' | 'Putri' = lower.includes('putri') ? 'Putri' : 'Putra';
+  const parenMatch = (gedungStr || '').match(/\(([^)]+)\)/);
+  if (parenMatch && parenMatch[1].trim()) {
+    return { kategori, namaGedung: parenMatch[1].trim() };
+  }
+  const stripped = (gedungStr || '')
+    .replace(/^gedung\s+(putra|putri)\s*[-:–]?\s*/i, '')
+    .trim();
+  return { kategori, namaGedung: stripped };
+};
+
+const buildGedungLabel = (kategori: 'Putra' | 'Putri', namaManual: string): string => {
+  const trimmed = namaManual.trim();
+  if (!trimmed) return `Gedung ${kategori}`;
+  if (/^gedung\s+(putra|putri)/i.test(trimmed)) {
+    return trimmed;
+  }
+  return `Gedung ${kategori} (${trimmed})`;
+};
 
 export const DataKamarView: React.FC = () => {
   const {
@@ -33,11 +58,44 @@ export const DataKamarView: React.FC = () => {
     setActiveMenu,
   } = useApp();
 
-  type ActiveKamarPanel = 'none' | 'add' | 'edit' | 'hapus' | 'penghuni';
+  type ActiveKamarPanel = 'none' | 'add' | 'edit' | 'hapus' | 'penghuni' | 'gedung';
   const [activePanel, setActivePanel] = useState<ActiveKamarPanel>('none');
   const [selectedGedungFilter, setSelectedGedungFilter] = useState<string>('Semua');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Saved default manual names for Gedung Putra & Gedung Putri
+  const [gedungNames, setGedungNames] = useState<{ putra: string; putri: string }>(() => {
+    try {
+      const saved = localStorage.getItem(GEDUNG_NAMES_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            putra: typeof parsed.putra === 'string' ? parsed.putra : '',
+            putri: typeof parsed.putri === 'string' ? parsed.putri : '',
+          };
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    const existingPutra = kamarList.find((k) => k.gedung.toLowerCase().includes('putra'));
+    const existingPutri = kamarList.find((k) => k.gedung.toLowerCase().includes('putri'));
+    return {
+      putra: existingPutra ? extractGedungInfo(existingPutra.gedung).namaGedung : 'Sultan Hadlirin',
+      putri: existingPutri ? extractGedungInfo(existingPutri.gedung).namaGedung : 'Ratu Shima',
+    };
+  });
+
+  // Inline "Atur Nama Gedung" form state
+  const [gedungPutraInput, setGedungPutraInput] = useState<string>(gedungNames.putra);
+  const [gedungPutriInput, setGedungPutriInput] = useState<string>(gedungNames.putri);
+  const [applyGedungToExisting, setApplyGedungToExisting] = useState<boolean>(true);
+
+  // Per-room gedung category & manual building name state (synced into formData.gedung)
+  const [formGedungKategori, setFormGedungKategori] = useState<'Putra' | 'Putri'>('Putra');
+  const [formGedungNamaManual, setFormGedungNamaManual] = useState<string>(gedungNames.putra);
 
   // Edit & Hapus state
   const [editTargetId, setEditTargetId] = useState<string>('');
@@ -54,7 +112,7 @@ export const DataKamarView: React.FC = () => {
 
   const initialFormState: Omit<Kamar, 'id'> = {
     nama: '',
-    gedung: 'Gedung Putra (Sultan Hadlirin)',
+    gedung: buildGedungLabel('Putra', gedungNames.putra),
     lantai: 'Lantai 1',
     kapasitas: 9,
     waliAsuhId: waliAsuhList[0]?.id || '',
@@ -78,12 +136,48 @@ export const DataKamarView: React.FC = () => {
     }, 50);
   };
 
+  const persistGedungNames = (next: { putra: string; putri: string }) => {
+    setGedungNames(next);
+    try {
+      localStorage.setItem(GEDUNG_NAMES_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const handleSelectFormKategori = (kategori: 'Putra' | 'Putri', useDefaultOnSwitch = false) => {
+    let nextNama = formGedungNamaManual;
+    if (useDefaultOnSwitch) {
+      const prevDefault = formGedungKategori === 'Putra' ? gedungNames.putra : gedungNames.putri;
+      if (!formGedungNamaManual.trim() || formGedungNamaManual.trim() === prevDefault.trim()) {
+        nextNama = kategori === 'Putra' ? gedungNames.putra : gedungNames.putri;
+      }
+    }
+    setFormGedungKategori(kategori);
+    setFormGedungNamaManual(nextNama);
+    setFormData((prev) => ({
+      ...prev,
+      gedung: buildGedungLabel(kategori, nextNama),
+    }));
+  };
+
+  const handleChangeFormGedungManual = (value: string) => {
+    setFormGedungNamaManual(value);
+    setFormData((prev) => ({
+      ...prev,
+      gedung: buildGedungLabel(formGedungKategori, value),
+    }));
+  };
+
   const populateEditForm = (kamar: Kamar) => {
     setEditTargetId(kamar.id);
     setFormError(null);
+    const { kategori, namaGedung } = extractGedungInfo(kamar.gedung);
+    setFormGedungKategori(kategori);
+    setFormGedungNamaManual(namaGedung);
     setFormData({
       nama: kamar.nama,
-      gedung: kamar.gedung,
+      gedung: buildGedungLabel(kategori, namaGedung),
       lantai: kamar.lantai,
       kapasitas: kamar.kapasitas,
       waliAsuhId: kamar.waliAsuhId,
@@ -94,13 +188,54 @@ export const DataKamarView: React.FC = () => {
   };
 
   const handleOpenAdd = () => {
+    const defaultKategori: 'Putra' | 'Putri' =
+      selectedGedungFilter === 'Putri' ? 'Putri' : 'Putra';
+    const defaultNama =
+      defaultKategori === 'Putra' ? gedungNames.putra : gedungNames.putri;
+    setFormGedungKategori(defaultKategori);
+    setFormGedungNamaManual(defaultNama);
     setFormData({
       ...initialFormState,
+      gedung: buildGedungLabel(defaultKategori, defaultNama),
       waliAsuhId: waliAsuhList[0]?.id || '',
     });
     setFormError(null);
     setActivePanel('add');
     scrollToFormPanel();
+  };
+
+  const handleOpenGedung = () => {
+    setGedungPutraInput(gedungNames.putra);
+    setGedungPutriInput(gedungNames.putri);
+    setApplyGedungToExisting(true);
+    setFormError(null);
+    setActivePanel('gedung');
+    scrollToFormPanel();
+  };
+
+  const handleSaveGedungSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    const nextPutra = gedungPutraInput.trim();
+    const nextPutri = gedungPutriInput.trim();
+    const updatedNames = { putra: nextPutra, putri: nextPutri };
+    persistGedungNames(updatedNames);
+
+    if (applyGedungToExisting) {
+      kamarList.forEach((k) => {
+        const isPutri = k.gedung.toLowerCase().includes('putri');
+        const newLabel = isPutri
+          ? buildGedungLabel('Putri', nextPutri)
+          : buildGedungLabel('Putra', nextPutra);
+        if (k.gedung !== newLabel) {
+          updateKamar(k.id, { gedung: newLabel });
+        }
+      });
+    }
+
+    setActivePanel('none');
+    showToast(
+      `✓ Nama Gedung disimpan: ${buildGedungLabel('Putra', nextPutra)} & ${buildGedungLabel('Putri', nextPutri)}.`
+    );
   };
 
   const handleOpenEdit = (kamar?: Kamar) => {
@@ -139,7 +274,7 @@ export const DataKamarView: React.FC = () => {
 
   const filteredKamar = kamarList.filter((k) => {
     if (selectedGedungFilter === 'Semua') return true;
-    return k.gedung.includes(selectedGedungFilter);
+    return k.gedung.toLowerCase().includes(selectedGedungFilter.toLowerCase());
   });
 
   const handleSaveAdd = (e: React.FormEvent) => {
@@ -149,16 +284,29 @@ export const DataKamarView: React.FC = () => {
       setFormError('Nama kamar wajib diisi.');
       return;
     }
+    const finalGedung = buildGedungLabel(formGedungKategori, formGedungNamaManual);
+    const sameCategoryRooms = kamarList.filter((k) =>
+      formGedungKategori === 'Putri'
+        ? k.gedung.toLowerCase().includes('putri')
+        : k.gedung.toLowerCase().includes('putra')
+    );
+    if (sameCategoryRooms.length === 0 && formGedungNamaManual.trim()) {
+      persistGedungNames({
+        ...gedungNames,
+        [formGedungKategori === 'Putra' ? 'putra' : 'putri']: formGedungNamaManual.trim(),
+      });
+    }
     setFormError(null);
     addKamar({
       ...formData,
       nama: trimmedNama,
+      gedung: finalGedung,
       kapasitas: Math.max(1, Number(formData.kapasitas) || 1),
     });
     setSelectedGedungFilter('Semua');
     setActivePanel('none');
     setFormData(initialFormState);
-    showToast(`✓ Kamar "${trimmedNama}" berhasil ditambahkan.`);
+    showToast(`✓ Kamar "${trimmedNama}" (${finalGedung}) berhasil ditambahkan.`);
   };
 
   const handleSaveEdit = (e: React.FormEvent) => {
@@ -173,14 +321,16 @@ export const DataKamarView: React.FC = () => {
       setFormError('Nama kamar wajib diisi.');
       return;
     }
+    const finalGedung = buildGedungLabel(formGedungKategori, formGedungNamaManual);
     setFormError(null);
     updateKamar(target.id, {
       ...formData,
       nama: trimmedNama,
+      gedung: finalGedung,
       kapasitas: Math.max(1, Number(formData.kapasitas) || 1),
     });
     setActivePanel('none');
-    showToast(`✓ Data kamar "${trimmedNama}" berhasil diperbarui.`);
+    showToast(`✓ Data kamar "${trimmedNama}" (${finalGedung}) berhasil diperbarui.`);
   };
 
   const handleConfirmDeleteSingle = (e: React.FormEvent) => {
@@ -250,6 +400,16 @@ export const DataKamarView: React.FC = () => {
     if (!activePenghuniRoom) return;
     updateKamar(activePenghuniRoom.id, { ketuaKamarId: siswaId });
     showToast(`✓ ${namaSiswa} ditetapkan sebagai Ketua ${activePenghuniRoom.nama}.`);
+  };
+
+  const handleCancelKetuaKamar = (namaSiswa?: string) => {
+    if (!activePenghuniRoom) return;
+    updateKamar(activePenghuniRoom.id, { ketuaKamarId: '' });
+    showToast(
+      namaSiswa
+        ? `✓ Status Ketua ${activePenghuniRoom.nama} untuk ${namaSiswa} dibatalkan.`
+        : `✓ Pemilihan Ketua ${activePenghuniRoom.nama} dibatalkan.`
+    );
   };
 
   return (
@@ -349,6 +509,18 @@ export const DataKamarView: React.FC = () => {
             </button>
             <button
               type="button"
+              onClick={() => (activePanel === 'gedung' ? setActivePanel('none') : handleOpenGedung())}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-[1.5px] border-[#1a1c1a] transition-all cursor-pointer whitespace-nowrap ${
+                activePanel === 'gedung'
+                  ? 'bg-amber-600 text-white shadow-none translate-x-0.5 translate-y-0.5'
+                  : 'bg-amber-50 text-amber-900 shadow-[2px_2px_0px_#1a1c1a] hover:bg-amber-600 hover:text-white'
+              }`}
+            >
+              <Building2 className="w-3.5 h-3.5" />
+              <span>Atur Nama Gedung</span>
+            </button>
+            <button
+              type="button"
               onClick={() =>
                 activePanel === 'hapus' ? setActivePanel('none') : handleOpenHapus(undefined, 'single')
               }
@@ -365,8 +537,104 @@ export const DataKamarView: React.FC = () => {
         </div>
       </div>
 
-      {/* INLINE FORM SECTION (TAMBAH / PENGHUNI / EDIT / HAPUS KAMAR) */}
+      {/* INLINE FORM SECTION (TAMBAH / PENGHUNI / EDIT / GEDUNG / HAPUS KAMAR) */}
       <div ref={formSectionRef}>
+        {/* FORM ATUR NAMA GEDUNG MANUAL */}
+        {activePanel === 'gedung' && (
+          <div className="bg-white border-[1.5px] border-[#1a1c1a] shadow-[5px_5px_0px_#d97706] p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b-[1.5px] border-[#1a1c1a]">
+              <div>
+                <h2 className="font-syne text-xl font-extrabold text-[#1a1c1a] tracking-tight">
+                  Pengaturan Nama Gedung Asrama
+                </h2>
+                <p className="text-xs font-mono-custom text-[#1a1c1a]/65 mt-0.5">
+                  Isi manual nama Gedung Putra dan Gedung Putri sesuai penamaan asrama Anda.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePanel('none')}
+                className="p-1.5 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
+                aria-label="Tutup pengaturan nama gedung"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveGedungSettings} className="space-y-4 font-mono-custom text-xs">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-3.5 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] space-y-2">
+                  <label className="block font-bold text-[#006b54] uppercase">
+                    Nama Gedung Putra (Isi Manual)
+                  </label>
+                  <input
+                    type="text"
+                    value={gedungPutraInput}
+                    onChange={(e) => setGedungPutraInput(e.target.value)}
+                    placeholder="Contoh: Sultan Hadlirin / Al-Fatih / Blok A"
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white focus:outline-none focus:border-[#006b54] font-sans text-sm"
+                  />
+                  <p className="text-[11px] text-[#1a1c1a]/65">
+                    Tampilan label:{' '}
+                    <strong className="text-[#1a1c1a]">
+                      {buildGedungLabel('Putra', gedungPutraInput)}
+                    </strong>
+                  </p>
+                </div>
+
+                <div className="p-3.5 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] space-y-2">
+                  <label className="block font-bold text-[#006b54] uppercase">
+                    Nama Gedung Putri (Isi Manual)
+                  </label>
+                  <input
+                    type="text"
+                    value={gedungPutriInput}
+                    onChange={(e) => setGedungPutriInput(e.target.value)}
+                    placeholder="Contoh: Ratu Shima / Khadijah / Blok B"
+                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white focus:outline-none focus:border-[#006b54] font-sans text-sm"
+                  />
+                  <p className="text-[11px] text-[#1a1c1a]/65">
+                    Tampilan label:{' '}
+                    <strong className="text-[#1a1c1a]">
+                      {buildGedungLabel('Putri', gedungPutriInput)}
+                    </strong>
+                  </p>
+                </div>
+              </div>
+
+              {kamarList.length > 0 && (
+                <label className="flex items-center gap-2.5 p-3 bg-amber-50/70 border border-amber-500 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={applyGedungToExisting}
+                    onChange={(e) => setApplyGedungToExisting(e.target.checked)}
+                    className="w-4 h-4 accent-[#006b54]"
+                  />
+                  <span className="font-sans text-xs font-semibold text-[#1a1c1a]">
+                    Terapkan nama gedung baru ke seluruh kamar Putra &amp; Putri yang sudah terdaftar ({kamarList.length} kamar)
+                  </span>
+                </label>
+              )}
+
+              <div className="pt-3 border-t border-[#1a1c1a] flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActivePanel('none')}
+                  className="px-4 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] text-[#1a1c1a] font-bold uppercase cursor-pointer"
+                >
+                  BATAL
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 px-5 py-2 border-[1.5px] border-[#1a1c1a] bg-[#006b54] hover:bg-[#005240] text-white font-bold uppercase shadow-[2.5px_2.5px_0px_#1a1c1a] cursor-pointer"
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>SIMPAN NAMA GEDUNG</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
         {/* FORM TAMBAH KAMAR */}
         {activePanel === 'add' && (
           <div className="bg-white border-[1.5px] border-[#1a1c1a] shadow-[5px_5px_0px_#1a1c1a] p-5 sm:p-6">
@@ -417,16 +685,46 @@ export const DataKamarView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block font-bold text-[#1a1c1a] mb-1">GEDUNG ASRAMA *</label>
-                  <select
-                    value={formData.gedung}
-                    onChange={(e) =>
-                      setFormData({ ...formData, gedung: e.target.value as Kamar['gedung'] })
-                    }
-                    className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
-                  >
-                    <option value="Gedung Putra (Sultan Hadlirin)">Gedung Putra (Sultan Hadlirin)</option>
-                    <option value="Gedung Putri (Ratu Shima)">Gedung Putri (Ratu Shima)</option>
-                  </select>
+                  <div className="space-y-1.5">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectFormKategori('Putra', true)}
+                        className={`px-2.5 py-1.5 text-[11px] font-bold border-[1.5px] border-[#1a1c1a] uppercase transition-colors cursor-pointer ${
+                          formGedungKategori === 'Putra'
+                            ? 'bg-[#006b54] text-white'
+                            : 'bg-[#fdfcf9] text-[#1a1c1a] hover:bg-[#1a1c1a]/5'
+                        }`}
+                      >
+                        Gedung Putra
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectFormKategori('Putri', true)}
+                        className={`px-2.5 py-1.5 text-[11px] font-bold border-[1.5px] border-[#1a1c1a] uppercase transition-colors cursor-pointer ${
+                          formGedungKategori === 'Putri'
+                            ? 'bg-[#006b54] text-white'
+                            : 'bg-[#fdfcf9] text-[#1a1c1a] hover:bg-[#1a1c1a]/5'
+                        }`}
+                      >
+                        Gedung Putri
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={formGedungNamaManual}
+                      onChange={(e) => handleChangeFormGedungManual(e.target.value)}
+                      placeholder={
+                        formGedungKategori === 'Putra'
+                          ? 'Isi manual nama gedung putra (cth: Sultan Hadlirin)'
+                          : 'Isi manual nama gedung putri (cth: Ratu Shima)'
+                      }
+                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] font-sans"
+                    />
+                    <span className="block text-[10px] text-[#1a1c1a]/65">
+                      Label: <strong className="text-[#006b54]">{buildGedungLabel(formGedungKategori, formGedungNamaManual)}</strong>
+                    </span>
+                  </div>
                 </div>
                 <div>
                   <label className="block font-bold text-[#1a1c1a] mb-1">LANTAI</label>
@@ -591,12 +889,11 @@ export const DataKamarView: React.FC = () => {
                 {activePenghuniRoom && (
                   <>
                     {/* Info Ringkas Kamar */}
-                    <div className="p-3 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] grid grid-cols-2 sm:grid-cols-5 gap-3">
                       <div>
                         <span className="text-[10px] text-[#1a1c1a]/60 block">GEDUNG & LANTAI</span>
                         <strong className="text-[#1a1c1a]">
-                          {activePenghuniRoom.gedung.includes('Putra') ? 'Putra' : 'Putri'} ·{' '}
-                          {activePenghuniRoom.lantai}
+                          {activePenghuniRoom.gedung} · {activePenghuniRoom.lantai}
                         </strong>
                       </div>
                       <div>
@@ -604,6 +901,29 @@ export const DataKamarView: React.FC = () => {
                         <strong className="text-[#006b54]">
                           {getWaliAsuh(activePenghuniRoom.waliAsuhId)?.nama || '-'}
                         </strong>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-[#1a1c1a]/60 block">KETUA KAMAR</span>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                          <strong className="text-[#1a1c1a]">
+                            {getSiswa(activePenghuniRoom.ketuaKamarId)?.nama || '- (Belum dipilih)'}
+                          </strong>
+                          {activePenghuniRoom.ketuaKamarId && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCancelKetuaKamar(
+                                  getSiswa(activePenghuniRoom.ketuaKamarId)?.nama
+                                )
+                              }
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-bold border border-rose-700 bg-rose-50 hover:bg-rose-700 hover:text-white text-rose-800 uppercase cursor-pointer"
+                              title="Batalkan Ketua Kamar"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                              <span>Batalkan</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div>
                         <span className="text-[10px] text-[#1a1c1a]/60 block">TERISI / KAPASITAS</span>
@@ -718,7 +1038,17 @@ export const DataKamarView: React.FC = () => {
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                                  {!isKetua && (
+                                  {isKetua ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCancelKetuaKamar(siswa.nama)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold border border-amber-600 bg-amber-100 hover:bg-rose-700 hover:border-rose-700 hover:text-white text-amber-950 uppercase cursor-pointer whitespace-nowrap transition-colors"
+                                      title="Batalkan status Ketua Kamar"
+                                    >
+                                      <X className="w-3 h-3" />
+                                      <span>Batalkan Ketua</span>
+                                    </button>
+                                  ) : (
                                     <button
                                       type="button"
                                       onClick={() => handleSetKetuaKamar(siswa.id, siswa.nama)}
@@ -726,7 +1056,7 @@ export const DataKamarView: React.FC = () => {
                                       title="Tetapkan sebagai Ketua Kamar"
                                     >
                                       <Crown className="w-3 h-3" />
-                                      <span>Ketua</span>
+                                      <span>Pilih Ketua</span>
                                     </button>
                                   )}
                                   <button
@@ -857,16 +1187,46 @@ export const DataKamarView: React.FC = () => {
                   </div>
                   <div>
                     <label className="block font-bold text-[#1a1c1a] mb-1">GEDUNG ASRAMA *</label>
-                    <select
-                      value={formData.gedung}
-                      onChange={(e) =>
-                        setFormData({ ...formData, gedung: e.target.value as Kamar['gedung'] })
-                      }
-                      className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9]"
-                    >
-                      <option value="Gedung Putra (Sultan Hadlirin)">Gedung Putra (Sultan Hadlirin)</option>
-                      <option value="Gedung Putri (Ratu Shima)">Gedung Putri (Ratu Shima)</option>
-                    </select>
+                    <div className="space-y-1.5">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectFormKategori('Putra', true)}
+                          className={`px-2.5 py-1.5 text-[11px] font-bold border-[1.5px] border-[#1a1c1a] uppercase transition-colors cursor-pointer ${
+                            formGedungKategori === 'Putra'
+                              ? 'bg-[#006b54] text-white'
+                              : 'bg-[#fdfcf9] text-[#1a1c1a] hover:bg-[#1a1c1a]/5'
+                          }`}
+                        >
+                          Gedung Putra
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectFormKategori('Putri', true)}
+                          className={`px-2.5 py-1.5 text-[11px] font-bold border-[1.5px] border-[#1a1c1a] uppercase transition-colors cursor-pointer ${
+                            formGedungKategori === 'Putri'
+                              ? 'bg-[#006b54] text-white'
+                              : 'bg-[#fdfcf9] text-[#1a1c1a] hover:bg-[#1a1c1a]/5'
+                          }`}
+                        >
+                          Gedung Putri
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={formGedungNamaManual}
+                        onChange={(e) => handleChangeFormGedungManual(e.target.value)}
+                        placeholder={
+                          formGedungKategori === 'Putra'
+                            ? 'Isi manual nama gedung putra (cth: Sultan Hadlirin)'
+                            : 'Isi manual nama gedung putri (cth: Ratu Shima)'
+                        }
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] font-sans"
+                      />
+                      <span className="block text-[10px] text-[#1a1c1a]/65">
+                        Label: <strong className="text-[#006b54]">{buildGedungLabel(formGedungKategori, formGedungNamaManual)}</strong>
+                      </span>
+                    </div>
                   </div>
                   <div>
                     <label className="block font-bold text-[#1a1c1a] mb-1">LANTAI</label>
@@ -931,6 +1291,52 @@ export const DataKamarView: React.FC = () => {
                     </select>
                   </div>
                 </div>
+
+                {/* Pemilihan & Pembatalan Ketua Kamar */}
+                {(() => {
+                  const editPenghuniOptions = siswaList.filter(
+                    (s) => s.kamarId === editTargetId || (formData.ketuaKamarId && s.id === formData.ketuaKamarId)
+                  );
+                  return (
+                    <div className="p-3.5 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="font-bold text-[#1a1c1a] flex items-center gap-1.5">
+                          <Crown className="w-3.5 h-3.5 text-amber-600" />
+                          <span>KETUA KAMAR (OPSIONAL)</span>
+                        </label>
+                        {formData.ketuaKamarId && (
+                          <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, ketuaKamarId: '' })}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold border border-rose-700 bg-rose-50 hover:bg-rose-700 hover:text-white text-rose-800 uppercase cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                            <span>Batalkan Ketua</span>
+                          </button>
+                        )}
+                      </div>
+                      <select
+                        value={formData.ketuaKamarId}
+                        onChange={(e) =>
+                          setFormData({ ...formData, ketuaKamarId: e.target.value })
+                        }
+                        className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-white font-sans"
+                      >
+                        <option value="">-- Belum Dipilih / Tidak Ada Ketua --</option>
+                        {editPenghuniOptions.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.nama} ({s.kelas})
+                          </option>
+                        ))}
+                      </select>
+                      {editPenghuniOptions.length === 0 && (
+                        <p className="text-[11px] font-sans text-[#1a1c1a]/65">
+                          Belum ada santri penghuni di kamar ini. Tambahkan penghuni melalui Form Penghuni Kamar terlebih dahulu.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div className="pt-3 border-t border-[#1a1c1a] flex flex-wrap items-center justify-between gap-2">
                   <button
@@ -1134,8 +1540,18 @@ export const DataKamarView: React.FC = () => {
         <div className="flex gap-2 overflow-x-auto">
           {[
             { key: 'Semua', label: `SEMUA KAMAR (${kamarList.length})` },
-            { key: 'Putra', label: 'ASRAMA PUTRA (SULTAN HADLIRIN)' },
-            { key: 'Putri', label: 'ASRAMA PUTRI (RATU SHIMA)' },
+            {
+              key: 'Putra',
+              label: gedungNames.putra.trim()
+                ? `GEDUNG PUTRA (${gedungNames.putra.trim().toUpperCase()})`
+                : 'GEDUNG PUTRA',
+            },
+            {
+              key: 'Putri',
+              label: gedungNames.putri.trim()
+                ? `GEDUNG PUTRI (${gedungNames.putri.trim().toUpperCase()})`
+                : 'GEDUNG PUTRI',
+            },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -1215,7 +1631,7 @@ export const DataKamarView: React.FC = () => {
                   <div className="flex items-start justify-between gap-2 border-b-[1.5px] border-[#1a1c1a] pb-2.5 mb-3">
                     <div>
                       <span className="font-mono-custom text-[10px] text-[#006b54] font-bold uppercase tracking-wider block">
-                        {kamar.gedung.includes('Putra') ? 'Gedung Putra' : 'Gedung Putri'} · {kamar.lantai}
+                        {kamar.gedung} · {kamar.lantai}
                       </span>
                       <h3 className="text-base font-bold font-syne text-[#1a1c1a] tracking-tight">
                         {kamar.nama}
@@ -1262,7 +1678,7 @@ export const DataKamarView: React.FC = () => {
                     <div className="flex justify-between items-center">
                       <span className="text-[#1a1c1a]/60">KETUA:</span>
                       <span className="font-bold text-[#1a1c1a] truncate max-w-[130px]">
-                        {ketua?.nama?.split(' ')[0] || (penghuni[0]?.nama?.split(' ')[0] ?? '-')}
+                        {ketua?.nama?.split(' ')[0] || '-'}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">

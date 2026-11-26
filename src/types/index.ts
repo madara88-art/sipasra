@@ -23,9 +23,9 @@ export type MenuItemId =
   | 'laporan';
 
 export type ShiftPiketType =
-  | 'Pagi (05:00 - 13:00)'
-  | 'Sore (13:00 - 21:00)'
-  | 'Malam (21:00 - 05:00)'
+  | 'Pagi (07:00 - 15:00)'
+  | 'Sore (15:00 - 23:00)'
+  | 'Malam (23:00 - 07:00)'
   | 'Pendamping Penuh';
 
 export interface CatatanPergantianShift {
@@ -66,6 +66,10 @@ export interface DokumenSiswa {
 export interface Siswa {
   id: string;
   nisn: string;
+  nik?: string;
+  noKk?: string;
+  tempatLahir?: string;
+  tanggalLahir?: string;
   nama: string;
   panggilan: string;
   jenisKelamin: 'L' | 'P';
@@ -77,6 +81,9 @@ export interface Siswa {
     namaIbu: string;
     noHp: string;
     alamat: string;
+    desa?: string;
+    kecamatan?: string;
+    kabupaten?: string;
     kotaAsal: string;
   };
   tanggalMasuk: string;
@@ -105,7 +112,7 @@ export interface MutasiRecord {
 export interface Kamar {
   id: string;
   nama: string;
-  gedung: 'Gedung Putra (Sultan Hadlirin)' | 'Gedung Putri (Ratu Shima)';
+  gedung: string;
   lantai: 'Lantai 1' | 'Lantai 2';
   kapasitas: number;
   waliAsuhId: string;
@@ -123,8 +130,9 @@ export interface WaliAsuh {
   noHp: string;
   email: string;
   kamarBinaanIds: string[];
+  kamarBinaanManual?: string;
   fokusBimbingan: string;
-  shiftPiket: 'Pagi (05:00 - 13:00)' | 'Sore (13:00 - 21:00)' | 'Malam (21:00 - 05:00)' | 'Pendamping Penuh';
+  shiftPiket: ShiftPiketType;
   status: 'Bertugas' | 'Libur / Lepas Piket';
 }
 
@@ -166,6 +174,26 @@ export interface KebersihanKamar {
   skorKerapianDiri?: number; // 1-5
   catatan: string;
   tindakanEdukasi?: string;
+}
+
+export type StatusAksiKebersihan = 'Perlu Tindak Lanjut' | 'Dalam Proses' | 'Selesai';
+
+export interface CatatanAksiKamar {
+  id: string;
+  tanggal: string;
+  kamarId: string;
+  penanggungJawabId: string;
+  penanggungJawabManual?: string;
+  aspekTerkait:
+    | 'Umum / Semua Aspek'
+    | '1. Kebersihan Diri'
+    | '2. Tempat Tidur'
+    | '3. Locket Lemari'
+    | '4. Piket';
+  temuan: string;
+  rencanaAksi: string;
+  targetSelesai?: string;
+  status: StatusAksiKebersihan;
 }
 
 export interface KebersihanSantriRecord {

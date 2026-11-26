@@ -48,8 +48,9 @@ export const DataWaliAsuhView: React.FC = () => {
     noHp: '',
     email: '',
     kamarBinaanIds: [],
+    kamarBinaanManual: '',
     fokusBimbingan: "Tahfidz Al-Qur'an & Karakter Santri",
-    shiftPiket: 'Pagi (05:00 - 13:00)',
+    shiftPiket: 'Pagi (07:00 - 15:00)',
     status: 'Bertugas',
   };
 
@@ -68,6 +69,19 @@ export const DataWaliAsuhView: React.FC = () => {
     }, 50);
   };
 
+  const getKamarBinaanDisplay = (wali: WaliAsuh): string => {
+    const binaanKamar = kamarList.filter(
+      (k) => (wali.kamarBinaanIds || []).includes(k.id) || k.waliAsuhId === wali.id
+    );
+    const linkedNames = binaanKamar.map((k) => k.nama.trim()).filter(Boolean);
+    const manualNames = (wali.kamarBinaanManual || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const combined = Array.from(new Set([...linkedNames, ...manualNames]));
+    return combined.join(', ') || '-';
+  };
+
   const populateEditForm = (wali: WaliAsuh) => {
     setEditTargetId(wali.id);
     setFormError(null);
@@ -79,6 +93,7 @@ export const DataWaliAsuhView: React.FC = () => {
       noHp: wali.noHp,
       email: wali.email,
       kamarBinaanIds: wali.kamarBinaanIds || [],
+      kamarBinaanManual: wali.kamarBinaanManual || '',
       fokusBimbingan: wali.fokusBimbingan,
       shiftPiket: wali.shiftPiket,
       status: wali.status,
@@ -89,6 +104,7 @@ export const DataWaliAsuhView: React.FC = () => {
     setFormData({
       ...initialFormState,
       kamarBinaanIds: [],
+      kamarBinaanManual: '',
     });
     setFormError(null);
     setActivePanel('add');
@@ -145,6 +161,7 @@ export const DataWaliAsuhView: React.FC = () => {
       nip: formData.nip.trim() || '-',
       noHp: formData.noHp.trim(),
       email: formData.email.trim(),
+      kamarBinaanManual: (formData.kamarBinaanManual || '').trim(),
       fokusBimbingan: formData.fokusBimbingan.trim() || 'Pendampingan Karakter Santri',
     });
     setStatusFilter('Semua');
@@ -174,6 +191,7 @@ export const DataWaliAsuhView: React.FC = () => {
       nip: formData.nip.trim() || '-',
       noHp: formData.noHp.trim(),
       email: formData.email.trim(),
+      kamarBinaanManual: (formData.kamarBinaanManual || '').trim(),
       fokusBimbingan: formData.fokusBimbingan.trim() || 'Pendampingan Karakter Santri',
     });
     setActivePanel('none');
@@ -205,11 +223,13 @@ export const DataWaliAsuhView: React.FC = () => {
   const filteredWali = waliAsuhList.filter((w) => {
     const matchesStatus = statusFilter === 'Semua' || w.status === statusFilter;
     const q = searchTerm.trim().toLowerCase();
+    const kamarLabel = getKamarBinaanDisplay(w).toLowerCase();
     const matchesSearch =
       !q ||
       w.nama.toLowerCase().includes(q) ||
       w.nip.toLowerCase().includes(q) ||
-      w.fokusBimbingan.toLowerCase().includes(q);
+      w.fokusBimbingan.toLowerCase().includes(q) ||
+      kamarLabel.includes(q);
     return matchesStatus && matchesSearch;
   });
 
@@ -298,9 +318,9 @@ export const DataWaliAsuhView: React.FC = () => {
             }
             className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54]"
           >
-            <option value="Pagi (05:00 - 13:00)">Pagi (05:00 - 13:00)</option>
-            <option value="Sore (13:00 - 21:00)">Sore (13:00 - 21:00)</option>
-            <option value="Malam (21:00 - 05:00)">Malam (21:00 - 05:00)</option>
+            <option value="Pagi (07:00 - 15:00)">Pagi (07:00 - 15:00)</option>
+            <option value="Sore (15:00 - 23:00)">Sore (15:00 - 23:00)</option>
+            <option value="Malam (23:00 - 07:00)">Malam (23:00 - 07:00)</option>
             <option value="Pendamping Penuh">Pendamping Penuh</option>
           </select>
         </div>
@@ -330,37 +350,48 @@ export const DataWaliAsuhView: React.FC = () => {
         />
       </div>
 
-      <div>
-        <label className="block font-bold text-[#1a1c1a] mb-1">
-          KAMAR BINAAN ({formData.kamarBinaanIds.length} dipilih)
+      <div className="space-y-2">
+        <label className="block font-bold text-[#1a1c1a]">
+          KAMAR BINAAN (ISI MANUAL)
         </label>
-        {kamarList.length === 0 ? (
-          <div className="p-2.5 bg-[#fdfcf9] border border-[#1a1c1a]/30 text-[#1a1c1a]/70 font-sans text-xs">
-            Belum ada data kamar asrama. Kamar binaan dapat dipilih nanti setelah kamar ditambahkan.
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-2.5 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a]">
-            {kamarList.map((k) => {
-              const checked = formData.kamarBinaanIds.includes(k.id);
-              return (
-                <label
-                  key={k.id}
-                  className={`flex items-center gap-2 p-2 border text-xs cursor-pointer select-none transition-colors ${
-                    checked
-                      ? 'bg-emerald-50 border-[#006b54] text-[#006b54] font-bold'
-                      : 'bg-white border-[#1a1c1a]/25 text-[#1a1c1a]'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleKamarBinaan(k.id)}
-                    className="accent-[#006b54]"
-                  />
-                  <span className="truncate font-sans">{k.nama}</span>
-                </label>
-              );
-            })}
+        <input
+          type="text"
+          placeholder="Contoh: Kamar 01, Kamar 02 (pisahkan dengan koma jika lebih dari satu)"
+          value={formData.kamarBinaanManual || ''}
+          onChange={(e) =>
+            setFormData({ ...formData, kamarBinaanManual: e.target.value })
+          }
+          className="w-full px-3 py-2 border-[1.5px] border-[#1a1c1a] bg-[#fdfcf9] focus:outline-none focus:border-[#006b54] font-sans"
+        />
+
+        {kamarList.length > 0 && (
+          <div className="space-y-1.5 pt-1">
+            <span className="block text-[10px] font-bold text-[#1a1c1a]/70 uppercase">
+              Atau centang dari daftar kamar terdaftar ({formData.kamarBinaanIds.length} dipilih):
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-2.5 bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a]">
+              {kamarList.map((k) => {
+                const checked = formData.kamarBinaanIds.includes(k.id);
+                return (
+                  <label
+                    key={k.id}
+                    className={`flex items-center gap-2 p-2 border text-xs cursor-pointer select-none transition-colors ${
+                      checked
+                        ? 'bg-emerald-50 border-[#006b54] text-[#006b54] font-bold'
+                        : 'bg-white border-[#1a1c1a]/25 text-[#1a1c1a]'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleKamarBinaan(k.id)}
+                      className="accent-[#006b54]"
+                    />
+                    <span className="truncate font-sans">{k.nama}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
@@ -709,9 +740,6 @@ export const DataWaliAsuhView: React.FC = () => {
                     {(() => {
                       const target = waliAsuhList.find((w) => w.id === hapusSingleId);
                       if (!target) return null;
-                      const binaanKamar = kamarList.filter(
-                        (k) => target.kamarBinaanIds.includes(k.id) || k.waliAsuhId === target.id
-                      );
                       return (
                         <div className="p-3.5 bg-rose-50 border-[1.5px] border-rose-600 text-rose-950 space-y-1">
                           <div className="font-bold text-sm font-sans">
@@ -723,7 +751,7 @@ export const DataWaliAsuhView: React.FC = () => {
                           </div>
                           <div>
                             Kamar Binaan:{' '}
-                            <strong>{binaanKamar.map((k) => k.nama).join(', ') || '-'}</strong>
+                            <strong>{getKamarBinaanDisplay(target)}</strong>
                           </div>
                         </div>
                       );
@@ -936,7 +964,7 @@ export const DataWaliAsuhView: React.FC = () => {
                     <div>
                       <span className="text-[#1a1c1a]/60 block text-[10px]">KAMAR BINAAN:</span>
                       <div className="font-bold text-[#1a1c1a] mt-0.5 flex items-center justify-between gap-1">
-                        <span className="truncate">{binaanKamar.map((k) => k.nama).join(', ') || '-'}</span>
+                        <span className="truncate">{getKamarBinaanDisplay(wali)}</span>
                         <span className="text-[#006b54] font-bold bg-[#fdfcf9] border border-[#1a1c1a] px-1.5 py-0.2 shrink-0">
                           {totalSantriBinaan} ANAK
                         </span>

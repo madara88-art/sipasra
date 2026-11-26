@@ -8,6 +8,7 @@ import {
   KegiatanHarianItem,
   PresensiKegiatan,
   KebersihanKamar,
+  CatatanAksiKamar,
   IbadahRecord,
   StatusIbadah,
   SesiIbadah,
@@ -62,6 +63,7 @@ interface AppContextType {
   kegiatanHarianList: KegiatanHarianItem[];
   presensiList: PresensiKegiatan[];
   kebersihanList: KebersihanKamar[];
+  catatanAksiKebersihanList: CatatanAksiKamar[];
   ibadahList: IbadahRecord[];
   kesehatanList: CatatanKesehatan[];
   ckgList: PemeriksaanCKG[];
@@ -108,6 +110,9 @@ interface AppContextType {
   updatePresensi: (presensi: PresensiKegiatan) => void;
 
   addKebersihan: (kebersihan: Omit<KebersihanKamar, 'id'>) => void;
+  addCatatanAksiKebersihan: (aksi: Omit<CatatanAksiKamar, 'id'>) => void;
+  updateCatatanAksiKebersihan: (id: string, data: Partial<CatatanAksiKamar>) => void;
+  deleteCatatanAksiKebersihan: (id: string) => void;
   addIbadah: (ibadah: Omit<IbadahRecord, 'id'>) => void;
   updateIbadahRecord: (record: IbadahRecord) => void;
   bulkUpdateIbadah: (
@@ -279,10 +284,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : INITIAL_KAMAR;
   });
 
+  const normalizeShiftLabel = (shift: any): any => {
+    if (shift === 'Pagi (05:00 - 13:00)') return 'Pagi (07:00 - 15:00)';
+    if (shift === 'Sore (13:00 - 21:00)') return 'Sore (15:00 - 23:00)';
+    if (shift === 'Malam (21:00 - 05:00)') return 'Malam (23:00 - 07:00)';
+    return shift;
+  };
+
   const [waliAsuhList, setWaliAsuhList] = useState<WaliAsuh[]>(() => {
     if (hasCleanedSeedWali) return INITIAL_WALI_ASUH;
     const saved = localStorage.getItem(`${STORAGE_KEY}_wali`);
-    return saved ? JSON.parse(saved) : INITIAL_WALI_ASUH;
+    if (!saved) return INITIAL_WALI_ASUH;
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed)
+        ? parsed.map((w: any) => ({ ...w, shiftPiket: normalizeShiftLabel(w.shiftPiket) }))
+        : INITIAL_WALI_ASUH;
+    } catch {
+      return INITIAL_WALI_ASUH;
+    }
   });
 
   const [kegiatanHarianList, setKegiatanHarianList] = useState<KegiatanHarianItem[]>(() => {
@@ -416,7 +436,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [shiftLogList, setShiftLogList] = useState<CatatanPergantianShift[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_shift_log`);
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed)
+        ? parsed.map((item: any) => ({
+            ...item,
+            dariShift: normalizeShiftLabel(item.dariShift),
+            keShift: normalizeShiftLabel(item.keShift),
+          }))
+        : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [catatanAksiKebersihanList, setCatatanAksiKebersihanList] = useState<CatatanAksiKamar[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_catatan_aksi_kebersihan`);
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
@@ -478,6 +517,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY}_shift_log`, JSON.stringify(shiftLogList));
   }, [shiftLogList]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      `${STORAGE_KEY}_catatan_aksi_kebersihan`,
+      JSON.stringify(catatanAksiKebersihanList)
+    );
+  }, [catatanAksiKebersihanList]);
 
   // Resolvers
   const getSiswa = (id?: string) => (id ? siswaList.find((s) => s.id === id) : undefined);
@@ -641,18 +687,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // mode === 'upsert'
     setSiswaList((prev) => {
       const mapByNisn = new Map<string, Siswa>();
-      prev.forEach((s) => mapByNisn.set(s.nisn.trim(), s));
+      const mapByName = new Map<string, Siswa>();
+      prev.forEach((s) => {
+        const keyNisn = s.nisn.trim();
+        if (keyNisn && keyNisn !== '-') {
+          mapByNisn.set(keyNisn, s);
+        }
+        const keyName = s.nama.trim().toLowerCase();
+        if (keyName) {
+          mapByName.set(keyName, s);
+        }
+      });
 
       const updatedList = [...prev];
       const newlyCreated: Siswa[] = [];
 
       items.forEach((item, idx) => {
         const cleanNisn = item.nisn.trim();
-        const existing = mapByNisn.get(cleanNisn);
+        const cleanName = item.nama.trim().toLowerCase();
+        const existing =
+          (cleanNisn && cleanNisn !== '-' ? mapByNisn.get(cleanNisn) : undefined) ||
+          (cleanName ? mapByName.get(cleanName) : undefined);
         if (existing) {
           const index = updatedList.findIndex((s) => s.id === existing.id);
           if (index !== -1) {
-            updatedList[index] = { ...existing, ...item };
+            updatedList[index] = {
+              ...existing,
+              ...item,
+              nisn: cleanNisn && cleanNisn !== '-' ? item.nisn : existing.nisn,
+              nik: item.nik || existing.nik,
+              noKk: item.noKk || existing.noKk,
+              tempatLahir: item.tempatLahir || existing.tempatLahir,
+              tanggalLahir: item.tanggalLahir || existing.tanggalLahir,
+              kamarId: item.kamarId || existing.kamarId,
+              waliAsuhId: item.waliAsuhId || existing.waliAsuhId,
+              alergi: item.alergi || existing.alergi,
+              catatanKhusus: item.catatanKhusus || existing.catatanKhusus,
+              orangTua: {
+                namaAyah: item.orangTua?.namaAyah || existing.orangTua?.namaAyah || '',
+                namaIbu: item.orangTua?.namaIbu || existing.orangTua?.namaIbu || '',
+                noHp: item.orangTua?.noHp || existing.orangTua?.noHp || '',
+                alamat: item.orangTua?.alamat || existing.orangTua?.alamat || '',
+                desa: item.orangTua?.desa || existing.orangTua?.desa || '',
+                kecamatan: item.orangTua?.kecamatan || existing.orangTua?.kecamatan || '',
+                kabupaten: item.orangTua?.kabupaten || existing.orangTua?.kabupaten || '',
+                kotaAsal: item.orangTua?.kotaAsal || existing.orangTua?.kotaAsal || '',
+              },
+              dokumen:
+                existing.dokumen || item.dokumen
+                  ? {
+                      ...existing.dokumen,
+                      ...item.dokumen,
+                      ktpNomor: item.dokumen?.ktpNomor || existing.dokumen?.ktpNomor,
+                      kkNomor: item.dokumen?.kkNomor || existing.dokumen?.kkNomor,
+                      akteNomor: item.dokumen?.akteNomor || existing.dokumen?.akteNomor,
+                    }
+                  : undefined,
+            };
             updated++;
           }
         } else {
@@ -661,7 +752,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             id: `sis-${Date.now()}-${idx}`,
           };
           newlyCreated.push(newStudent);
-          mapByNisn.set(cleanNisn, newStudent);
+          if (cleanNisn && cleanNisn !== '-') {
+            mapByNisn.set(cleanNisn, newStudent);
+          }
+          if (cleanName) {
+            mapByName.set(cleanName, newStudent);
+          }
           added++;
         }
       });
@@ -687,12 +783,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteKamar = (id: string) => {
     setKamarList((prev) => prev.filter((k) => k.id !== id));
     setKebersihanList((prev) => prev.filter((keb) => keb.kamarId !== id));
+    setCatatanAksiKebersihanList((prev) => prev.filter((aksi) => aksi.kamarId !== id));
     setSiswaList((prev) => prev.map((s) => (s.kamarId === id ? { ...s, kamarId: '' } : s)));
   };
 
   const clearAllKamar = () => {
     setKamarList([]);
     setKebersihanList([]);
+    setCatatanAksiKebersihanList([]);
     setSelectedKamarId(null);
     setSiswaList((prev) => prev.map((s) => ({ ...s, kamarId: '' })));
   };
@@ -758,11 +856,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addKebersihan = (data: Omit<KebersihanKamar, 'id'>) => {
-    const newItem: KebersihanKamar = {
+    setKebersihanList((prev) => {
+      const idx = prev.findIndex(
+        (item) => item.kamarId === data.kamarId && item.tanggal === data.tanggal
+      );
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...data, id: copy[idx].id };
+        return copy;
+      }
+      const newItem: KebersihanKamar = {
+        ...data,
+        id: `keb-${Date.now()}`,
+      };
+      return [newItem, ...prev];
+    });
+  };
+
+  const addCatatanAksiKebersihan = (data: Omit<CatatanAksiKamar, 'id'>) => {
+    const newItem: CatatanAksiKamar = {
       ...data,
-      id: `keb-${Date.now()}`,
+      id: `aksi-keb-${Date.now()}`,
     };
-    setKebersihanList((prev) => [newItem, ...prev]);
+    setCatatanAksiKebersihanList((prev) => [newItem, ...prev]);
+  };
+
+  const updateCatatanAksiKebersihan = (id: string, data: Partial<CatatanAksiKamar>) => {
+    setCatatanAksiKebersihanList((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...data } : item))
+    );
+  };
+
+  const deleteCatatanAksiKebersihan = (id: string) => {
+    setCatatanAksiKebersihanList((prev) => prev.filter((item) => item.id !== id));
   };
 
   const addIbadah = (data: Omit<IbadahRecord, 'id'>) => {
@@ -996,6 +1122,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setKegiatanHarianList(INITIAL_KEGIATAN_HARIAN);
     setPresensiList(INITIAL_PRESENSI);
     setKebersihanList(INITIAL_KEBERSIHAN);
+    setCatatanAksiKebersihanList([]);
     setIbadahList(INITIAL_IBADAH);
     setKesehatanList(INITIAL_KESEHATAN);
     setCkgList(INITIAL_CKG);
@@ -1028,6 +1155,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         kegiatanHarianList,
         presensiList,
         kebersihanList,
+        catatanAksiKebersihanList,
         ibadahList,
         kesehatanList,
         ckgList,
@@ -1057,6 +1185,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearAllKegiatanHarian,
         updatePresensi,
         addKebersihan,
+        addCatatanAksiKebersihan,
+        updateCatatanAksiKebersihan,
+        deleteCatatanAksiKebersihan,
         addIbadah,
         updateIbadahRecord,
         bulkUpdateIbadah,

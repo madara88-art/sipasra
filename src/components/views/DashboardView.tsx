@@ -229,45 +229,60 @@ export const DashboardView: React.FC = () => {
   return (
     <div className="space-y-6 pb-20 md:pb-8">
       {/* Editorial Hero Header matching Variation 2 */}
-      <div className="bg-[#006b54] text-white border-[2px] border-[#1a1c1a] neo-shadow-md p-6 relative overflow-hidden">
-        <div className="absolute right-0 top-0 bottom-0 opacity-10 pointer-events-none flex items-center pr-6">
-          <Home className="w-56 h-56 text-white" />
-        </div>
-        <div className="relative z-10 max-w-2xl">
-          <span className="status-badge bg-white text-[#1a1c1a] mb-2 font-mono-custom">
-            ASRAMA SEKOLAH RAKYAT 1 JEPARA
-          </span>
-          <h1 className="font-syne text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-[-0.04em] text-white leading-tight">
-            SI-PASRA (Sistem Pengasuhan Sekolah Rakyat 1 Jepara)
-          </h1>
-          <p className="text-xs sm:text-sm text-emerald-100/90 font-mono-custom mt-2 leading-relaxed">
-            Pusat pemantauan wali asuh: rekap harian, mingguan, dan bulanan santri cilik asrama.
-          </p>
+      <div className="bg-[#006b54] text-white border-[2px] border-[#1a1c1a] neo-shadow-md p-5 sm:p-6 relative overflow-hidden">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="max-w-2xl">
+            <span className="status-badge bg-white text-[#1a1c1a] mb-2 font-mono-custom">
+              ASRAMA SEKOLAH RAKYAT 1 JEPARA
+            </span>
+            <h1 className="font-syne text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-[-0.04em] text-white leading-tight">
+              SI-PASRA (Sistem Pengasuhan Sekolah Rakyat 1 Jepara)
+            </h1>
+            <p className="text-xs sm:text-sm text-emerald-100/90 font-mono-custom mt-2 leading-relaxed">
+              Pusat pemantauan wali asuh: rekap harian, mingguan, dan bulanan santri cilik asrama.
+            </p>
 
-          {/* Toggle Tab */}
-          <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-white/20">
-            <button
-              type="button"
-              onClick={() => setDashboardTab('wali-asuh')}
-              className={`px-3.5 py-1.5 font-mono-custom text-xs font-bold uppercase transition-all border-[1.5px] border-[#1a1c1a] ${
-                dashboardTab === 'wali-asuh'
-                  ? 'bg-[#1a1c1a] text-white neo-shadow-sm'
-                  : 'bg-white text-[#1a1c1a] hover:bg-slate-100'
-              }`}
-            >
-              [+] DASHBOARD WALI ASUH
-            </button>
-            <button
-              type="button"
-              onClick={() => setDashboardTab('ringkasan-asrama')}
-              className={`px-3.5 py-1.5 font-mono-custom text-xs font-bold uppercase transition-all border-[1.5px] border-[#1a1c1a] ${
-                dashboardTab === 'ringkasan-asrama'
-                  ? 'bg-[#1a1c1a] text-white neo-shadow-sm'
-                  : 'bg-white text-[#1a1c1a] hover:bg-slate-100'
-              }`}
-            >
-              [+] AGENDA & JADWAL ASRAMA
-            </button>
+            {/* Toggle Tab */}
+            <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-white/20">
+              <button
+                type="button"
+                onClick={() => setDashboardTab('wali-asuh')}
+                className={`px-3.5 py-1.5 font-mono-custom text-xs font-bold uppercase transition-all border-[1.5px] border-[#1a1c1a] ${
+                  dashboardTab === 'wali-asuh'
+                    ? 'bg-[#1a1c1a] text-white neo-shadow-sm'
+                    : 'bg-white text-[#1a1c1a] hover:bg-slate-100'
+                }`}
+              >
+                [+] DASHBOARD WALI ASUH
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardTab('ringkasan-asrama')}
+                className={`px-3.5 py-1.5 font-mono-custom text-xs font-bold uppercase transition-all border-[1.5px] border-[#1a1c1a] ${
+                  dashboardTab === 'ringkasan-asrama'
+                    ? 'bg-[#1a1c1a] text-white neo-shadow-sm'
+                    : 'bg-white text-[#1a1c1a] hover:bg-slate-100'
+                }`}
+              >
+                [+] AGENDA & JADWAL ASRAMA
+              </button>
+            </div>
+          </div>
+
+          {/* Logo Resmi Sekolah Rakyat & SI-PASRA */}
+          <div className="shrink-0 self-start md:self-center bg-white border-[1.5px] border-[#1a1c1a] shadow-[4px_4px_0px_#1a1c1a] p-2.5 sm:p-3 flex items-center gap-3">
+            <img
+              src="/assets/aistudio/images__22__d75033cc.jpg"
+              alt="Logo Sekolah Rakyat"
+              referrerPolicy="no-referrer"
+              className="w-20 h-20 sm:w-24 sm:h-24 object-contain"
+            />
+            <img
+              src="/assets/aistudio/PASRAH_AJA_585f5260.png"
+              alt="Logo SI-PASRA Sekolah Rakyat"
+              referrerPolicy="no-referrer"
+              className="w-20 h-20 sm:w-24 sm:h-24 object-contain border-l border-[#1a1c1a]/15 pl-3"
+            />
           </div>
         </div>
       </div>
@@ -353,6 +368,66 @@ export const DashboardView: React.FC = () => {
             MASJID AL-IKHLAS
           </div>
         </div>
+      </div>
+
+      {/* RINGKASAN ASRAMA: ANAK TERBINA, KAMAR ASRAMA, WALI ASUH */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <button
+          type="button"
+          onClick={() => navigateTo('siswa')}
+          className="bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] neo-shadow p-4 text-left flex items-center justify-between gap-3 hover:-translate-y-0.5 transition-transform cursor-pointer"
+        >
+          <div>
+            <span className="font-mono-custom text-[0.68rem] uppercase font-bold text-[#1a1c1a]/60 block">
+              ANAK TERBINA
+            </span>
+            <div className="font-syne text-2xl font-extrabold text-[#006b54] tabular-nums mt-0.5">
+              {totalSiswa}{' '}
+              <span className="text-xs font-mono-custom font-normal text-[#1a1c1a]/60">
+                SANTRI
+              </span>
+            </div>
+          </div>
+          <Users className="w-5 h-5 text-[#006b54] shrink-0" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigateTo('kamar')}
+          className="bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] neo-shadow p-4 text-left flex items-center justify-between gap-3 hover:-translate-y-0.5 transition-transform cursor-pointer"
+        >
+          <div>
+            <span className="font-mono-custom text-[0.68rem] uppercase font-bold text-[#1a1c1a]/60 block">
+              KAMAR ASRAMA
+            </span>
+            <div className="font-syne text-2xl font-extrabold text-[#1a1c1a] tabular-nums mt-0.5">
+              {kamarList.length}{' '}
+              <span className="text-xs font-mono-custom font-normal text-[#1a1c1a]/60">
+                KAMAR
+              </span>
+            </div>
+          </div>
+          <Home className="w-5 h-5 text-[#1a1c1a] shrink-0" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigateTo('wali-asuh')}
+          className="bg-[#fdfcf9] border-[1.5px] border-[#1a1c1a] neo-shadow p-4 text-left flex items-center justify-between gap-3 hover:-translate-y-0.5 transition-transform cursor-pointer"
+        >
+          <div>
+            <span className="font-mono-custom text-[0.68rem] uppercase font-bold text-[#1a1c1a]/60 block">
+              WALI ASUH
+            </span>
+            <div className="font-syne text-2xl font-extrabold text-[#1a1c1a] tabular-nums mt-0.5">
+              {waliAsuhList.length}{' '}
+              <span className="text-xs font-mono-custom font-normal text-[#1a1c1a]/60">
+                AKTIF
+              </span>
+            </div>
+          </div>
+          <UserCheck className="w-5 h-5 text-[#006b54] shrink-0" />
+        </button>
       </div>
 
       {/* DASHBOARD WALI ASUH VIEW */}

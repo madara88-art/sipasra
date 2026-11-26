@@ -16,6 +16,7 @@ import { Siswa } from '../../types';
 import {
   parseSiswaExcel,
   generateSiswaTemplateExcel,
+  formatDateDMY,
   ParseResult,
 } from '../../utils/excelUtils';
 import { Modal } from '../common/Modal';
@@ -137,7 +138,7 @@ export const ImportSiswaModal: React.FC<ImportSiswaModalProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".xlsx, .xls, .csv"
+                accept=".xlsx, .xls, .csv, .txt"
                 onChange={(e) => {
                   if (e.target.files && e.target.files[0]) {
                     handleFileChange(e.target.files[0]);
@@ -188,7 +189,7 @@ export const ImportSiswaModal: React.FC<ImportSiswaModalProps> = ({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".xlsx, .xls, .csv"
+                  accept=".xlsx, .xls, .csv, .txt"
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
                       handleFileChange(e.target.files[0]);
@@ -282,6 +283,7 @@ export const ImportSiswaModal: React.FC<ImportSiswaModalProps> = ({
                         <tr>
                           <th className="p-2">NISN</th>
                           <th className="p-2">NAMA LENGKAP</th>
+                          <th className="p-2">TTL / TGL LAHIR</th>
                           <th className="p-2">L/P</th>
                           <th className="p-2">KELAS</th>
                           <th className="p-2">KAMAR</th>
@@ -294,6 +296,13 @@ export const ImportSiswaModal: React.FC<ImportSiswaModalProps> = ({
                           <tr key={idx} className="hover:bg-[#1a1c1a]/5">
                             <td className="p-2 font-mono text-[10px] font-bold">{s.nisn}</td>
                             <td className="p-2 font-bold font-syne">{s.nama}</td>
+                            <td className="p-2 font-mono text-[10px]">
+                              {s.tempatLahir && s.tanggalLahir
+                                ? `${s.tempatLahir}, ${formatDateDMY(s.tanggalLahir)}`
+                                : s.tanggalLahir
+                                ? formatDateDMY(s.tanggalLahir)
+                                : s.tempatLahir || '-'}
+                            </td>
                             <td className="p-2">{s.jenisKelamin}</td>
                             <td className="p-2">{s.kelas}</td>
                             <td className="p-2 font-medium">{getKamarName(s.kamarId)}</td>

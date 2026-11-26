@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   FileText,
   Printer,
@@ -79,7 +79,21 @@ export const LaporanView: React.FC = () => {
   const [selectedSiswaId, setSelectedSiswaId] = useState<string>(siswaList[0]?.id || '');
   const [skalaNilai, setSkalaNilai] = useState<'1-4' | '1-10'>('1-4');
   const [isEditRaportOpen, setIsEditRaportOpen] = useState(false);
+  const [isEditTtdOpen, setIsEditTtdOpen] = useState(false);
   const [copiedWA, setCopiedWA] = useState(false);
+
+  const SIGNATURE_STORAGE_KEY = 'sipasra_raport_signatures_v1';
+
+  const loadSavedSignatures = () => {
+    try {
+      const raw = localStorage.getItem(SIGNATURE_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const savedSig = useMemo(() => loadSavedSignatures(), []);
 
   // Print Submenu States
   const [printDocType, setPrintDocType] = useState<PrintDocType>('raport');
@@ -89,26 +103,99 @@ export const LaporanView: React.FC = () => {
   const [showKopSurat, setShowKopSurat] = useState(true);
   const [showChartsOnPrint, setShowChartsOnPrint] = useState(true);
   const [showSignatures, setShowSignatures] = useState(true);
-  const [kepalaAsramaNama, setKepalaAsramaNama] = useState('Dr. H. Solikhin, M.Pd');
-  const [kepalaAsramaNip, setKepalaAsramaNip] = useState('19750810 200003 1 002');
-  const [koordinatorNama, setKoordinatorNama] = useState('Ust. Ahmad Fauzi, S.Pd.I');
-  const [koordinatorNip, setKoordinatorNip] = useState('19880412 201201 1 003');
-  const [tempatTanggalCetak, setTempatTanggalCetak] = useState(
-    `Jepara, ${new Date().toLocaleDateString('id-ID', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    })}`
+
+  const [kepalaSekolahNama, setKepalaSekolahNama] = useState<string>(
+    savedSig.kepalaSekolahNama ?? 'Dr. H. Solikhin, M.Pd'
+  );
+  const [kepalaSekolahNip, setKepalaSekolahNip] = useState<string>(
+    savedSig.kepalaSekolahNip ?? '19750810 200003 1 002'
+  );
+  const [waliAsramaNama, setWaliAsramaNama] = useState<string>(
+    savedSig.waliAsramaNama ?? 'Ust. Ahmad Fauzi, S.Pd.I'
+  );
+  const [waliAsramaNip, setWaliAsramaNip] = useState<string>(
+    savedSig.waliAsramaNip ?? '19880412 201201 1 003'
+  );
+  const [defaultWaliAsuhNama, setDefaultWaliAsuhNama] = useState<string>(
+    savedSig.defaultWaliAsuhNama ?? 'Ust. Farid, S.Pd'
+  );
+  const [customOrangTuaTtd, setCustomOrangTuaTtd] = useState<Record<string, string>>(
+    savedSig.customOrangTuaTtd ?? {}
+  );
+  const [customWaliAsuhTtd, setCustomWaliAsuhTtd] = useState<
+    Record<string, { nama?: string; nip?: string }>
+  >(savedSig.customWaliAsuhTtd ?? {});
+
+  const [tempatTanggalCetak, setTempatTanggalCetak] = useState<string>(
+    savedSig.tempatTanggalCetak ??
+      `Jepara, ${new Date().toLocaleDateString('id-ID', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })}`
   );
   const [printToast, setPrintToast] = useState<string | null>(null);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        SIGNATURE_STORAGE_KEY,
+        JSON.stringify({
+          kepalaSekolahNama,
+          kepalaSekolahNip,
+          waliAsramaNama,
+          waliAsramaNip,
+          defaultWaliAsuhNama,
+          customOrangTuaTtd,
+          customWaliAsuhTtd,
+          tempatTanggalCetak,
+        })
+      );
+    } catch {
+      // ignore storage quota error
+    }
+  }, [
+    kepalaSekolahNama,
+    kepalaSekolahNip,
+    waliAsramaNama,
+    waliAsramaNip,
+    defaultWaliAsuhNama,
+    customOrangTuaTtd,
+    customWaliAsuhTtd,
+    tempatTanggalCetak,
+  ]);
+
   const printSectionRef = useRef<HTMLDivElement>(null);
   const printAreaRef = useRef<HTMLDivElement>(null);
+  const ttdEditorRef = useRef<HTMLDivElement>(null);
 
   // Custom overrides stored in local state for the student report card
   const [customRaportOverrides, setCustomRaportOverrides] = useState<
     Record<string, Partial<RaportPengasuhan>>
   >({});
+
+  const getOrangTuaTtdName = (siswa?: Siswa) => {
+    if (!siswa) return '';
+    if (customOrangTuaTtd[siswa.id] !== undefined) {
+      return customOrangTuaTtd[siswa.id];
+    }
+    return siswa.orangTua?.namaAyah || siswa.orangTua?.namaIbu || '';
+  };
+
+  const getWaliAsuhTtd = (siswa?: Siswa) => {
+    if (!siswa) {
+      return { nama: defaultWaliAsuhNama, nip: '' };
+    }
+    const w = getWaliAsuh(siswa.waliAsuhId);
+    const custom = customWaliAsuhTtd[siswa.id];
+    return {
+      nama:
+        custom?.nama !== undefined
+          ? custom.nama
+          : formatWaliName(w) || defaultWaliAsuhNama,
+      nip: custom?.nip !== undefined ? custom.nip : w?.nip || '',
+    };
+  };
 
   const formatWaliName = (wali?: { nama: string; gelar?: string }) => {
     if (!wali) return '';
@@ -588,7 +675,7 @@ export const LaporanView: React.FC = () => {
 *Kelas:* ${selectedSiswa.kelas}
 *Kamar:* ${selectedKamar?.nama || '-'}
 *Periode:* ${autoRaport.periode}
-*Wali Asuh:* ${formatWaliName(selectedWali) || '-'}
+*Wali Asuh:* ${getWaliAsuhTtd(selectedSiswa).nama || '-'}
 
 *CAPAIAN 8 ASPEK PENGASUHAN (Skala ${skalaNilai}):*
 1. Kemandirian: ${autoRaport.aspek.kemandirian.nilai.toString().replace('.', ',')} (${autoRaport.aspek.kemandirian.predikat})
@@ -633,17 +720,17 @@ Wassalamu'alaikum Wr. Wb.
       withKop?: boolean;
       withCharts?: boolean;
       withSign?: boolean;
-      kepalaNama?: string;
-      kepalaNip?: string;
+      allowInlineTtdShortcut?: boolean;
       signDateText?: string;
     }
   ) => {
     const k = getKamar(siswa.kamarId);
-    const w = getWaliAsuh(siswa.waliAsuhId);
     const withKop = opts?.withKop ?? true;
     const withCharts = opts?.withCharts ?? true;
     const withSign = opts?.withSign ?? true;
-    const waliDisplay = formatWaliName(w) || koordinatorNama || 'Wali Asuh Pendamping';
+    const orangTuaDisplay = getOrangTuaTtdName(siswa);
+    const waliAsuhInfo = getWaliAsuhTtd(siswa);
+    const signDateText = opts?.signDateText || tempatTanggalCetak;
 
     return (
       <div className="space-y-6">
@@ -689,7 +776,7 @@ Wassalamu'alaikum Wr. Wb.
 
             <div className="flex items-center gap-2 sm:col-span-2">
               <span className="font-bold text-[#1a1c1a]/70">Wali Asuh:</span>
-              <strong className="text-[#1a1c1a]">{waliDisplay}</strong>
+              <strong className="text-[#1a1c1a]">{waliAsuhInfo.nama || '-'}</strong>
             </div>
           </div>
         </div>
@@ -827,39 +914,80 @@ Wassalamu'alaikum Wr. Wb.
           </div>
         </div>
 
-        {/* Kolom Tanda Tangan */}
+        {/* Kolom Tanda Tangan Resmi: Orang Tua/Wali, Wali Asuh, Wali Asrama, Mengetahui Kepala Sekolah */}
         {withSign && (
-          <div className="pt-8 grid grid-cols-3 text-center text-xs font-mono-custom border-t border-[#1a1c1a]/20 print-avoid-break">
-            <div>
-              <p className="text-[#1a1c1a]/70">Orang Tua / Wali Santri,</p>
-              <div className="h-16" />
-              <p className="font-bold underline text-[#1a1c1a]">
-                ({siswa.orangTua?.namaAyah || '..................................'})
-              </p>
-              <p className="text-[10px] text-[#1a1c1a]/60">Orang Tua Santri</p>
-            </div>
+          <div className="pt-6 border-t border-[#1a1c1a]/20 space-y-4 print-avoid-break">
+            {opts?.allowInlineTtdShortcut && (
+              <div className="flex items-center justify-between gap-2 no-print">
+                <span className="text-[10px] font-mono-custom font-bold uppercase text-[#1a1c1a]/60">
+                  // KOLOM TANDA TANGAN RESMI RAPORT
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditTtdOpen(true);
+                    setTimeout(() => {
+                      ttdEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 50);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-stone-100 hover:bg-amber-50 text-[#1a1c1a] border border-[#1a1c1a] text-[10.5px] font-mono-custom font-bold cursor-pointer"
+                >
+                  <Edit3 className="w-3 h-3 text-[#006b54]" />
+                  <span>Edit Nama Penandatangan</span>
+                </button>
+              </div>
+            )}
 
-            <div>
-              <p className="text-[#1a1c1a]/70">Wali Asuh Pendamping,</p>
-              <div className="h-16" />
-              <p className="font-bold underline text-[#1a1c1a]">{waliDisplay}</p>
-              <p className="text-[10px] text-[#1a1c1a]/60">
-                NIP. {w?.nip || koordinatorNip}
-              </p>
-            </div>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-8 text-center text-xs font-mono-custom">
+              {/* 1. Orang Tua / Wali */}
+              <div>
+                <p className="text-[#1a1c1a]/70">&nbsp;</p>
+                <p className="font-bold text-[#1a1c1a]">Orang Tua / Wali,</p>
+                <div className="h-14" />
+                <p className="font-bold underline text-[#1a1c1a]">
+                  {orangTuaDisplay ? `(${orangTuaDisplay})` : '(......................................)'}
+                </p>
+                <p className="text-[10px] text-[#1a1c1a]/60">Orang Tua / Wali Santri</p>
+              </div>
 
-            <div>
-              <p className="text-[#1a1c1a]/70">
-                {opts?.signDateText || 'Mengetahui,'}
-              </p>
-              <p className="text-[10.5px] text-[#1a1c1a]">Kepala Asrama Sekolah Rakyat 1 Jepara</p>
-              <div className="h-14" />
-              <p className="font-bold underline text-[#1a1c1a]">
-                {opts?.kepalaNama || kepalaAsramaNama}
-              </p>
-              <p className="text-[10px] text-[#1a1c1a]/60">
-                NIP. {opts?.kepalaNip || kepalaAsramaNip}
-              </p>
+              {/* 2. Wali Asuh */}
+              <div>
+                <p className="text-[#1a1c1a]/70">{signDateText}</p>
+                <p className="font-bold text-[#1a1c1a]">Wali Asuh,</p>
+                <div className="h-14" />
+                <p className="font-bold underline text-[#1a1c1a]">
+                  {waliAsuhInfo.nama || '......................................'}
+                </p>
+                {waliAsuhInfo.nip && (
+                  <p className="text-[10px] text-[#1a1c1a]/60">NIP. {waliAsuhInfo.nip}</p>
+                )}
+              </div>
+
+              {/* 3. Wali Asrama */}
+              <div>
+                <p className="text-[#1a1c1a]/70">&nbsp;</p>
+                <p className="font-bold text-[#1a1c1a]">Wali Asrama,</p>
+                <div className="h-14" />
+                <p className="font-bold underline text-[#1a1c1a]">
+                  {waliAsramaNama || '......................................'}
+                </p>
+                {waliAsramaNip && (
+                  <p className="text-[10px] text-[#1a1c1a]/60">NIP. {waliAsramaNip}</p>
+                )}
+              </div>
+
+              {/* 4. Mengetahui, Kepala Sekolah */}
+              <div>
+                <p className="text-[#1a1c1a]/70">Mengetahui,</p>
+                <p className="font-bold text-[#1a1c1a]">Kepala Sekolah,</p>
+                <div className="h-14" />
+                <p className="font-bold underline text-[#1a1c1a]">
+                  {kepalaSekolahNama || '......................................'}
+                </p>
+                {kepalaSekolahNip && (
+                  <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaSekolahNip}</p>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1148,19 +1276,23 @@ Wassalamu'alaikum Wr. Wb.
             <div className="pt-6 grid grid-cols-2 text-center text-xs font-mono-custom">
               <div>
                 <p className="text-[#1a1c1a]/60">Mengetahui,</p>
-                <p className="font-bold text-[#1a1c1a] mt-1">Kepala Asrama Sekolah Rakyat 1 Jepara</p>
+                <p className="font-bold text-[#1a1c1a] mt-1">Kepala Sekolah</p>
                 <div className="h-14" />
-                <p className="font-bold underline text-[#1a1c1a]">{kepalaAsramaNama}</p>
-                <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaAsramaNip}</p>
+                <p className="font-bold underline text-[#1a1c1a]">{kepalaSekolahNama}</p>
+                {kepalaSekolahNip && (
+                  <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaSekolahNip}</p>
+                )}
               </div>
               <div>
                 <p className="text-[#1a1c1a]/60">
                   Jepara, {new Date(selectedDateHarian).toLocaleDateString('id-ID')}
                 </p>
-                <p className="font-bold text-[#1a1c1a] mt-1">Koordinator Wali Asuh Piket</p>
+                <p className="font-bold text-[#1a1c1a] mt-1">Wali Asrama</p>
                 <div className="h-14" />
-                <p className="font-bold underline text-[#1a1c1a]">{koordinatorNama}</p>
-                <p className="text-[10px] text-[#1a1c1a]/60">NIP. {koordinatorNip}</p>
+                <p className="font-bold underline text-[#1a1c1a]">{waliAsramaNama}</p>
+                {waliAsramaNip && (
+                  <p className="text-[10px] text-[#1a1c1a]/60">NIP. {waliAsramaNip}</p>
+                )}
               </div>
             </div>
           </div>
@@ -1246,16 +1378,20 @@ Wassalamu'alaikum Wr. Wb.
 
             <div className="pt-6 grid grid-cols-2 text-center text-xs font-mono-custom">
               <div>
-                <p className="text-[#1a1c1a]/60">Koordinator Bimbingan Asrama,</p>
+                <p className="text-[#1a1c1a]/60">Wali Asrama,</p>
                 <div className="h-14" />
-                <p className="font-bold underline text-[#1a1c1a]">{koordinatorNama}</p>
-                <p className="text-[10px] text-[#1a1c1a]/60">NIP. {koordinatorNip}</p>
+                <p className="font-bold underline text-[#1a1c1a]">{waliAsramaNama}</p>
+                {waliAsramaNip && (
+                  <p className="text-[10px] text-[#1a1c1a]/60">NIP. {waliAsramaNip}</p>
+                )}
               </div>
               <div>
-                <p className="text-[#1a1c1a]/60">Kepala Asrama Sekolah Rakyat 1 Jepara,</p>
+                <p className="text-[#1a1c1a]/60">Mengetahui, Kepala Sekolah</p>
                 <div className="h-14" />
-                <p className="font-bold underline text-[#1a1c1a]">{kepalaAsramaNama}</p>
-                <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaAsramaNip}</p>
+                <p className="font-bold underline text-[#1a1c1a]">{kepalaSekolahNama}</p>
+                {kepalaSekolahNip && (
+                  <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaSekolahNip}</p>
+                )}
               </div>
             </div>
           </div>
@@ -1328,16 +1464,20 @@ Wassalamu'alaikum Wr. Wb.
 
             <div className="pt-6 grid grid-cols-2 text-center text-xs font-mono-custom">
               <div>
-                <p className="text-[#1a1c1a]/60">Koordinator Bimbingan Pengasuhan,</p>
+                <p className="text-[#1a1c1a]/60">Wali Asrama,</p>
                 <div className="h-14" />
-                <p className="font-bold underline text-[#1a1c1a]">{koordinatorNama}</p>
-                <p className="text-[10px] text-[#1a1c1a]/60">NIP. {koordinatorNip}</p>
+                <p className="font-bold underline text-[#1a1c1a]">{waliAsramaNama}</p>
+                {waliAsramaNip && (
+                  <p className="text-[10px] text-[#1a1c1a]/60">NIP. {waliAsramaNip}</p>
+                )}
               </div>
               <div>
-                <p className="text-[#1a1c1a]/60">Kepala Asrama Sekolah Rakyat 1 Jepara,</p>
+                <p className="text-[#1a1c1a]/60">Mengetahui, Kepala Sekolah</p>
                 <div className="h-14" />
-                <p className="font-bold underline text-[#1a1c1a]">{kepalaAsramaNama}</p>
-                <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaAsramaNip}</p>
+                <p className="font-bold underline text-[#1a1c1a]">{kepalaSekolahNama}</p>
+                {kepalaSekolahNip && (
+                  <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaSekolahNip}</p>
+                )}
               </div>
             </div>
           </div>
@@ -1435,6 +1575,19 @@ Wassalamu'alaikum Wr. Wb.
 
               <button
                 type="button"
+                onClick={() => setIsEditTtdOpen((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#1a1c1a] font-bold text-xs font-mono-custom shadow-xs cursor-pointer ${
+                  isEditTtdOpen
+                    ? 'bg-amber-200 text-[#1a1c1a]'
+                    : 'bg-amber-50 hover:bg-amber-100 text-[#1a1c1a]'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5 text-[#006b54]" />
+                <span>{isEditTtdOpen ? 'Tutup Edit Tanda Tangan' : 'Edit Tanda Tangan'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleCopyWA}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs font-mono-custom border border-[#1a1c1a] shadow-[1.5px_1.5px_0px_#1a1c1a] uppercase cursor-pointer"
               >
@@ -1461,6 +1614,208 @@ Wassalamu'alaikum Wr. Wb.
               </button>
             </div>
           </div>
+
+          {/* Inline Form Edit Tanda Tangan Raport */}
+          {isEditTtdOpen && (
+            <div
+              ref={ttdEditorRef}
+              className="bg-white border-[1.5px] border-[#1a1c1a] shadow-[5px_5px_0px_#006b54] p-5 space-y-4 no-print"
+            >
+              <div className="flex items-start justify-between gap-4 pb-3 border-b border-[#1a1c1a]">
+                <div>
+                  <span className="text-[10px] font-mono-custom font-bold uppercase text-[#006b54] block">
+                    // PENGATURAN PENANDATANGAN RAPORT PENGASUHAN
+                  </span>
+                  <h3 className="font-syne text-lg font-bold text-[#1a1c1a]">
+                    Edit Nama Tanda Tangan (Orang Tua/Wali, Wali Asuh, Wali Asrama, Kepala Sekolah)
+                  </h3>
+                  <p className="text-xs font-sans text-[#1a1c1a]/70 mt-0.5">
+                    Perubahan nama langsung tampil pada dokumen Raport dan tersimpan otomatis untuk pencetakan.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsEditTtdOpen(false)}
+                  className="p-1.5 border border-[#1a1c1a] bg-stone-50 hover:bg-rose-50 text-[#1a1c1a] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono-custom">
+                {/* 1. Orang Tua / Wali */}
+                <div className="p-3 bg-[#fdfcf9] border border-[#1a1c1a] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[#1a1c1a] uppercase">
+                      1. Orang Tua / Wali ({selectedSiswa.nama})
+                    </span>
+                    {customOrangTuaTtd[selectedSiswa.id] !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCustomOrangTuaTtd((prev) => {
+                            const next = { ...prev };
+                            delete next[selectedSiswa.id];
+                            return next;
+                          })
+                        }
+                        className="text-[10px] text-rose-700 hover:underline font-bold cursor-pointer"
+                      >
+                        Reset Default
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Nama Orang Tua / Wali Santri..."
+                    value={getOrangTuaTtdName(selectedSiswa)}
+                    onChange={(e) =>
+                      setCustomOrangTuaTtd((prev) => ({
+                        ...prev,
+                        [selectedSiswa.id]: e.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-[#1a1c1a] bg-white text-xs font-sans font-semibold"
+                  />
+                </div>
+
+                {/* 2. Wali Asuh */}
+                <div className="p-3 bg-[#fdfcf9] border border-[#1a1c1a] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[#1a1c1a] uppercase">
+                      2. Wali Asuh ({selectedSiswa.nama})
+                    </span>
+                    {customWaliAsuhTtd[selectedSiswa.id] !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCustomWaliAsuhTtd((prev) => {
+                            const next = { ...prev };
+                            delete next[selectedSiswa.id];
+                            return next;
+                          })
+                        }
+                        className="text-[10px] text-rose-700 hover:underline font-bold cursor-pointer"
+                      >
+                        Reset Default
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      list="raport-wali-suggestions"
+                      placeholder="Nama Wali Asuh..."
+                      value={getWaliAsuhTtd(selectedSiswa).nama}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCustomWaliAsuhTtd((prev) => ({
+                          ...prev,
+                          [selectedSiswa.id]: {
+                            nama: val,
+                            nip: prev[selectedSiswa.id]?.nip ?? getWaliAsuhTtd(selectedSiswa).nip,
+                          },
+                        }));
+                      }}
+                      className="w-full px-3 py-2 border border-[#1a1c1a] bg-white text-xs font-sans font-semibold"
+                    />
+                    <input
+                      type="text"
+                      placeholder="NIP Wali Asuh (opsional)"
+                      value={getWaliAsuhTtd(selectedSiswa).nip}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCustomWaliAsuhTtd((prev) => ({
+                          ...prev,
+                          [selectedSiswa.id]: {
+                            nama: prev[selectedSiswa.id]?.nama ?? getWaliAsuhTtd(selectedSiswa).nama,
+                            nip: val,
+                          },
+                        }));
+                      }}
+                      className="w-full px-3 py-2 border border-[#1a1c1a] bg-white text-xs"
+                    />
+                  </div>
+                  <datalist id="raport-wali-suggestions">
+                    {waliAsuhList.map((w) => (
+                      <option key={w.id} value={formatWaliName(w)} />
+                    ))}
+                  </datalist>
+                </div>
+
+                {/* 3. Wali Asrama */}
+                <div className="p-3 bg-[#fdfcf9] border border-[#1a1c1a] space-y-2">
+                  <span className="font-bold text-[#1a1c1a] uppercase block">
+                    3. Wali Asrama
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      list="raport-wali-suggestions"
+                      placeholder="Nama Wali Asrama..."
+                      value={waliAsramaNama}
+                      onChange={(e) => setWaliAsramaNama(e.target.value)}
+                      className="w-full px-3 py-2 border border-[#1a1c1a] bg-white text-xs font-sans font-semibold"
+                    />
+                    <input
+                      type="text"
+                      placeholder="NIP Wali Asrama (opsional)"
+                      value={waliAsramaNip}
+                      onChange={(e) => setWaliAsramaNip(e.target.value)}
+                      className="w-full px-3 py-2 border border-[#1a1c1a] bg-white text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* 4. Mengetahui: Kepala Sekolah */}
+                <div className="p-3 bg-[#fdfcf9] border border-[#1a1c1a] space-y-2">
+                  <span className="font-bold text-[#1a1c1a] uppercase block">
+                    4. Mengetahui, Kepala Sekolah
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nama Kepala Sekolah..."
+                      value={kepalaSekolahNama}
+                      onChange={(e) => setKepalaSekolahNama(e.target.value)}
+                      className="w-full px-3 py-2 border border-[#1a1c1a] bg-white text-xs font-sans font-semibold"
+                    />
+                    <input
+                      type="text"
+                      placeholder="NIP Kepala Sekolah (opsional)"
+                      value={kepalaSekolahNip}
+                      onChange={(e) => setKepalaSekolahNip(e.target.value)}
+                      className="w-full px-3 py-2 border border-[#1a1c1a] bg-white text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pt-2 border-t border-[#1a1c1a]/20 text-xs font-mono-custom">
+                <div className="flex-1 max-w-sm">
+                  <label className="block font-bold text-[#1a1c1a] mb-1">
+                    Tempat & Tanggal Tanda Tangan:
+                  </label>
+                  <input
+                    type="text"
+                    value={tempatTanggalCetak}
+                    onChange={(e) => setTempatTanggalCetak(e.target.value)}
+                    className="w-full px-3 py-2 border border-[#1a1c1a] bg-white text-xs font-sans"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditTtdOpen(false);
+                    showPrintNotice('✓ Nama penandatangan raport telah diperbarui.');
+                  }}
+                  className="px-4 py-2 bg-[#006b54] hover:bg-[#005240] text-white font-bold border border-[#1a1c1a] shadow-[2px_2px_0px_#1a1c1a] uppercase cursor-pointer"
+                >
+                  Selesai Edit Tanda Tangan
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Inline Form Edit Nilai Raport */}
           {isEditRaportOpen && editRaportForm && (
@@ -1612,7 +1967,9 @@ Wassalamu'alaikum Wr. Wb.
 
           {/* Dokumen Raport */}
           <div className="bg-white border-[1.5px] border-[#1a1c1a] neo-shadow p-5 sm:p-8 print:border-none print:shadow-none print:p-0">
-            {renderRaportDocumentBody(selectedSiswa, autoRaport)}
+            {renderRaportDocumentBody(selectedSiswa, autoRaport, {
+              allowInlineTtdShortcut: true,
+            })}
           </div>
         </div>
       )}
@@ -1892,41 +2249,98 @@ Wassalamu'alaikum Wr. Wb.
                   3. Penandatangan & Tanggal
                 </span>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
-                      Kepala Asrama:
-                    </label>
-                    <input
-                      type="text"
-                      value={kepalaAsramaNama}
-                      onChange={(e) => setKepalaAsramaNama(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
-                      NIP Kepala Asrama:
-                    </label>
-                    <input
-                      type="text"
-                      value={kepalaAsramaNip}
-                      onChange={(e) => setKepalaAsramaNip(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs"
-                    />
-                  </div>
-                </div>
+                {printDocType === 'raport' && raportPrintMode === 'single' && selectedSiswa && (
+                  <>
+                    <div>
+                      <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
+                        Orang Tua / Wali ({selectedSiswa.nama}):
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Nama Orang Tua / Wali..."
+                        value={getOrangTuaTtdName(selectedSiswa)}
+                        onChange={(e) =>
+                          setCustomOrangTuaTtd((prev) => ({
+                            ...prev,
+                            [selectedSiswa.id]: e.target.value,
+                          }))
+                        }
+                        className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                      />
+                    </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
-                      Koordinator / Wali Asuh:
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
+                          Wali Asuh:
+                        </label>
+                        <input
+                          type="text"
+                          list="cetak-wali-suggestions"
+                          value={getWaliAsuhTtd(selectedSiswa).nama}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setCustomWaliAsuhTtd((prev) => ({
+                              ...prev,
+                              [selectedSiswa.id]: {
+                                nama: val,
+                                nip: prev[selectedSiswa.id]?.nip ?? getWaliAsuhTtd(selectedSiswa).nip,
+                              },
+                            }));
+                          }}
+                          className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
+                          NIP Wali Asuh:
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Opsional"
+                          value={getWaliAsuhTtd(selectedSiswa).nip}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setCustomWaliAsuhTtd((prev) => ({
+                              ...prev,
+                              [selectedSiswa.id]: {
+                                nama: prev[selectedSiswa.id]?.nama ?? getWaliAsuhTtd(selectedSiswa).nama,
+                                nip: val,
+                              },
+                            }));
+                          }}
+                          className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {printDocType === 'raport' && raportPrintMode === 'all' && (
+                  <div className="grid grid-cols-1 gap-1.5">
+                    <label className="block font-bold text-[10px] text-[#1a1c1a]/75">
+                      Wali Asuh Default (jika santri belum punya wali asuh):
                     </label>
                     <input
                       type="text"
                       list="cetak-wali-suggestions"
-                      value={koordinatorNama}
-                      onChange={(e) => setKoordinatorNama(e.target.value)}
+                      value={defaultWaliAsuhNama}
+                      onChange={(e) => setDefaultWaliAsuhNama(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                    />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
+                      Wali Asrama:
+                    </label>
+                    <input
+                      type="text"
+                      list="cetak-wali-suggestions"
+                      value={waliAsramaNama}
+                      onChange={(e) => setWaliAsramaNama(e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
                     />
                     <datalist id="cetak-wali-suggestions">
@@ -1937,12 +2351,37 @@ Wassalamu'alaikum Wr. Wb.
                   </div>
                   <div>
                     <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
-                      NIP Koordinator:
+                      NIP Wali Asrama:
                     </label>
                     <input
                       type="text"
-                      value={koordinatorNip}
-                      onChange={(e) => setKoordinatorNip(e.target.value)}
+                      value={waliAsramaNip}
+                      onChange={(e) => setWaliAsramaNip(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
+                      Mengetahui (Kepala Sekolah):
+                    </label>
+                    <input
+                      type="text"
+                      value={kepalaSekolahNama}
+                      onChange={(e) => setKepalaSekolahNama(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs font-sans"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-[10px] text-[#1a1c1a]/75 mb-0.5">
+                      NIP Kepala Sekolah:
+                    </label>
+                    <input
+                      type="text"
+                      value={kepalaSekolahNip}
+                      onChange={(e) => setKepalaSekolahNip(e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-[#1a1c1a] bg-white text-xs"
                     />
                   </div>
@@ -1995,8 +2434,6 @@ Wassalamu'alaikum Wr. Wb.
                       withKop: showKopSurat,
                       withCharts: showChartsOnPrint,
                       withSign: showSignatures,
-                      kepalaNama: kepalaAsramaNama,
-                      kepalaNip: kepalaAsramaNip,
                       signDateText: tempatTanggalCetak,
                     })
                   ) : (
@@ -2013,8 +2450,6 @@ Wassalamu'alaikum Wr. Wb.
                               withKop: showKopSurat,
                               withCharts: showChartsOnPrint,
                               withSign: showSignatures,
-                              kepalaNama: kepalaAsramaNama,
-                              kepalaNip: kepalaAsramaNip,
                               signDateText: tempatTanggalCetak,
                             })}
                           </div>
@@ -2136,19 +2571,21 @@ Wassalamu'alaikum Wr. Wb.
                     <div className="pt-6 grid grid-cols-2 text-center text-xs font-mono-custom print-avoid-break">
                       <div>
                         <p className="text-[#1a1c1a]/60">Mengetahui,</p>
-                        <p className="font-bold text-[#1a1c1a] mt-1">
-                          Kepala Asrama Sekolah Rakyat 1 Jepara
-                        </p>
+                        <p className="font-bold text-[#1a1c1a] mt-1">Kepala Sekolah</p>
                         <div className="h-14" />
-                        <p className="font-bold underline text-[#1a1c1a]">{kepalaAsramaNama}</p>
-                        <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaAsramaNip}</p>
+                        <p className="font-bold underline text-[#1a1c1a]">{kepalaSekolahNama}</p>
+                        {kepalaSekolahNip && (
+                          <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaSekolahNip}</p>
+                        )}
                       </div>
                       <div>
                         <p className="text-[#1a1c1a]/60">{tempatTanggalCetak}</p>
-                        <p className="font-bold text-[#1a1c1a] mt-1">Koordinator Wali Asuh Piket</p>
+                        <p className="font-bold text-[#1a1c1a] mt-1">Wali Asrama</p>
                         <div className="h-14" />
-                        <p className="font-bold underline text-[#1a1c1a]">{koordinatorNama}</p>
-                        <p className="text-[10px] text-[#1a1c1a]/60">NIP. {koordinatorNip}</p>
+                        <p className="font-bold underline text-[#1a1c1a]">{waliAsramaNama}</p>
+                        {waliAsramaNip && (
+                          <p className="text-[10px] text-[#1a1c1a]/60">NIP. {waliAsramaNip}</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2202,19 +2639,23 @@ Wassalamu'alaikum Wr. Wb.
                   {showSignatures && (
                     <div className="pt-6 grid grid-cols-2 text-center text-xs font-mono-custom print-avoid-break">
                       <div>
-                        <p className="text-[#1a1c1a]/60">Koordinator Bimbingan Asrama,</p>
+                        <p className="text-[#1a1c1a]/60">Wali Asrama,</p>
                         <div className="h-14" />
-                        <p className="font-bold underline text-[#1a1c1a]">{koordinatorNama}</p>
-                        <p className="text-[10px] text-[#1a1c1a]/60">NIP. {koordinatorNip}</p>
+                        <p className="font-bold underline text-[#1a1c1a]">{waliAsramaNama}</p>
+                        {waliAsramaNip && (
+                          <p className="text-[10px] text-[#1a1c1a]/60">NIP. {waliAsramaNip}</p>
+                        )}
                       </div>
                       <div>
                         <p className="text-[#1a1c1a]/60">{tempatTanggalCetak}</p>
                         <p className="font-bold text-[#1a1c1a]">
-                          Kepala Asrama Sekolah Rakyat 1 Jepara
+                          Mengetahui, Kepala Sekolah
                         </p>
                         <div className="h-14" />
-                        <p className="font-bold underline text-[#1a1c1a]">{kepalaAsramaNama}</p>
-                        <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaAsramaNip}</p>
+                        <p className="font-bold underline text-[#1a1c1a]">{kepalaSekolahNama}</p>
+                        {kepalaSekolahNip && (
+                          <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaSekolahNip}</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2263,19 +2704,23 @@ Wassalamu'alaikum Wr. Wb.
                   {showSignatures && (
                     <div className="pt-6 grid grid-cols-2 text-center text-xs font-mono-custom print-avoid-break">
                       <div>
-                        <p className="text-[#1a1c1a]/60">Koordinator Bimbingan Pengasuhan,</p>
+                        <p className="text-[#1a1c1a]/60">Wali Asrama,</p>
                         <div className="h-14" />
-                        <p className="font-bold underline text-[#1a1c1a]">{koordinatorNama}</p>
-                        <p className="text-[10px] text-[#1a1c1a]/60">NIP. {koordinatorNip}</p>
+                        <p className="font-bold underline text-[#1a1c1a]">{waliAsramaNama}</p>
+                        {waliAsramaNip && (
+                          <p className="text-[10px] text-[#1a1c1a]/60">NIP. {waliAsramaNip}</p>
+                        )}
                       </div>
                       <div>
                         <p className="text-[#1a1c1a]/60">{tempatTanggalCetak}</p>
                         <p className="font-bold text-[#1a1c1a]">
-                          Kepala Asrama Sekolah Rakyat 1 Jepara
+                          Mengetahui, Kepala Sekolah
                         </p>
                         <div className="h-14" />
-                        <p className="font-bold underline text-[#1a1c1a]">{kepalaAsramaNama}</p>
-                        <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaAsramaNip}</p>
+                        <p className="font-bold underline text-[#1a1c1a]">{kepalaSekolahNama}</p>
+                        {kepalaSekolahNip && (
+                          <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaSekolahNip}</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2348,19 +2793,23 @@ Wassalamu'alaikum Wr. Wb.
                   {showSignatures && (
                     <div className="pt-6 grid grid-cols-2 text-center text-xs font-mono-custom print-avoid-break">
                       <div>
-                        <p className="text-[#1a1c1a]/60">Koordinator Pengasuhan Asrama,</p>
+                        <p className="text-[#1a1c1a]/60">Wali Asrama,</p>
                         <div className="h-14" />
-                        <p className="font-bold underline text-[#1a1c1a]">{koordinatorNama}</p>
-                        <p className="text-[10px] text-[#1a1c1a]/60">NIP. {koordinatorNip}</p>
+                        <p className="font-bold underline text-[#1a1c1a]">{waliAsramaNama}</p>
+                        {waliAsramaNip && (
+                          <p className="text-[10px] text-[#1a1c1a]/60">NIP. {waliAsramaNip}</p>
+                        )}
                       </div>
                       <div>
                         <p className="text-[#1a1c1a]/60">{tempatTanggalCetak}</p>
                         <p className="font-bold text-[#1a1c1a]">
-                          Kepala Asrama Sekolah Rakyat 1 Jepara
+                          Mengetahui, Kepala Sekolah
                         </p>
                         <div className="h-14" />
-                        <p className="font-bold underline text-[#1a1c1a]">{kepalaAsramaNama}</p>
-                        <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaAsramaNip}</p>
+                        <p className="font-bold underline text-[#1a1c1a]">{kepalaSekolahNama}</p>
+                        {kepalaSekolahNip && (
+                          <p className="text-[10px] text-[#1a1c1a]/60">NIP. {kepalaSekolahNip}</p>
+                        )}
                       </div>
                     </div>
                   )}
